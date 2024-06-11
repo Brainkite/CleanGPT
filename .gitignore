@@ -1,1 +1,4 @@
 .devcontainer/devcontainer.json
+__pycache__
+src/simplegpt.egg-info
+.vscode
