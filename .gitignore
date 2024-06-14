@@ -2,3 +2,6 @@
 __pycache__
 src/simplegpt.egg-info
 .vscode
+dataset
+**/*.txt
+scripts/playground.py
