@@ -20,10 +20,13 @@ class CasualSelfAttention(nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
+        
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        setattr(self.c_proj, 'GPT_SCALE_INIT', 1.)
+        
         # Create attention lower-triangular mask to keep only attn score with previous tokens
         self.register_buffer("bias",
                              torch.tril(
@@ -36,9 +39,9 @@ class CasualSelfAttention(nn.Module):
 
         #Compute batched multihead Q,K,V
         qkv = self.c_attn(x) # (bs, seq, 3*n_embd)
-        q, k, v = qkv.split(self.n_embd, dim=2)
 
         # Organize q,k,v by att heads
+        q, k, v = qkv.split(self.n_embd, dim=2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
@@ -50,10 +53,12 @@ class CasualSelfAttention(nn.Module):
         att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
         att = F.softmax(att, dim=-1)
         y = att @ v # (bs, nh, seq, hs)
+        
         # Catenate all heads (bs, nh, seq, hs)-> (bs, seq, n_embd)
         y = y.transpose(1,2).contiguous().view(B,T,C)
 
-        return self.c_proj(y)
+        y = self.c_proj(y)
+        return y
 
 class MLP(nn.Module):
 
@@ -62,6 +67,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+        setattr(self.c_proj, 'GPT_SCALE_INIT', 1.)
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -100,22 +106,45 @@ class GPT(nn.Module):
             )
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias = False)
+        
+        # Weight sharing scheme of "Attention is all you need"
+        self.transformer.wte.weight = self.lm_head.weight
+        
+        self.apply(self._init_weights)
     
-    def forward(self, idx):
+    def _init_weights(self, module):
+        # This method tries to reproduce the initialization method of original GPT2 paper.
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, 'GPT_SCALE_INIT'):
+                std *= (2 * self.config.n_layer) ** -0.5 # 2*n_layers because each block has 2 residual connexions
+            torch.nn.init.normal_(module.weight, mean=0., std=std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0., std=0.02)
+    
+    def forward(self, idx, targets=None):
         B,T = idx.size()
         assert T <= self.config.block_size
         
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
         pos_emb = self.transformer.wpe(pos) # (T, n_embd)
         tok_emb = self.transformer.wte(idx) # (B, T, n_emb)
-        x = tok_emb + pos_emb
         
+        x = tok_emb + pos_emb
         for block in self.transformer.h:
             x = block(x)
-        
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
-        return logits
+        
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)), # (B*T, vocab_size)
+                targets.view(-1) # (B*T,)
+                )
+        return logits, loss
         
     
     @classmethod
@@ -162,40 +191,7 @@ class GPT(nn.Module):
         
         return model
         
-#-----------------------------------------------------------------------------------------
-        
-num_return_seq = 5
-max_length = 30
 
-model = GPT.from_pretrained('gpt2')
-model.eval()
-model.to('cuda')
-
-import tiktoken
-enc = tiktoken.get_encoding('gpt2')
-tokens = enc.encode("Hello, I'm a language model,")
-tokens = torch.tensor(tokens, dtype=torch.long)
-tokens = tokens.unsqueeze(0).repeat(num_return_seq, 1)
-x = tokens.to('cuda')
-
-torch.manual_seed(42)
-torch.cuda.manual_seed(42)
-
-while x.size(1) < max_length:
-    with torch.no_grad():
-        logits = model(x) # (B,T,vocab_size)
-        logits = logits[:, -1, :] # (B,vocab_size)
-        probs = F.softmax(logits, dim=-1)
-        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1) # (B,50) (B,50)
-        ix = torch.multinomial(topk_probs, 1) #idxs of top prob (B,1)
-        xcol = torch.gather(topk_indices, -1, ix) # vocab idxs from selected top prob (B,1)
-        x = torch.cat((x, xcol), dim=1) # (B, T+1)
-    
-    
-for i in range(num_return_seq):
-    tokens = x[i, :max_length].tolist()
-    decode = enc.decode(tokens)
-    print(decode)
         
 
 
