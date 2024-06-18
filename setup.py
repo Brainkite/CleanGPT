@@ -7,7 +7,8 @@ setup(
     packages=find_packages(where="src"),
     install_requires=[
         "transformers[torch]",
-        "pytest"
+        "pytest",
+        "tiktoken"
     ],
     python_requires='>=3.9',
 )
