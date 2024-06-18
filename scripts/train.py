@@ -10,7 +10,13 @@ num_return_seq = 5
 max_length = 30
 
 # Model params
+total_batch_size = 2**19 # ~ 0.5M tokens
 B,T = 2, 512
+assert total_batch_size % (B*T) == 0
+grad_accum_steps = total_batch_size // (B*T)
+print(f"Total batch size: {total_batch_size}")
+print(f"=> gradient accumulation steps: {grad_accum_steps}")
+
 device = 'cuda'
 torch.set_float32_matmul_precision('high')
 autocast_bf16=False
@@ -46,17 +52,23 @@ model = torch.compile(model)
 
 for step in range(max_steps):
     t0 = time.time()
-    x, y = train_loader.new_batch()
-    x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    if autocast_bf16:
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
-            logits, loss = model(x, y)
-    else:
-        logits, loss = model(x, y)
-    loss.backward()
-    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     
+    loss_accum = .0
+    for accum_step in range(grad_accum_steps):
+        x, y = train_loader.new_batch()
+        x, y = x.to(device), y.to(device)
+        if autocast_bf16:
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                logits, loss = model(x, y)
+        else:
+            logits, loss = model(x, y)
+        
+        loss = loss / grad_accum_steps
+        loss_accum += loss.detach()
+        loss.backward()
+        
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     lr = get_lr(step)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
