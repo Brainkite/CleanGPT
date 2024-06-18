@@ -41,9 +41,9 @@ train_loader = SimpleDataloader("dataset/tiny_shakesprear.txt", B, T)
 
 model = GPT(GPTConfig())
 model.to(device)
-# model = torch.compile(model)
+optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
+model = torch.compile(model)
 
-optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4, betas=(0.9, 0.95), eps=1e-8)
 for step in range(max_steps):
     t0 = time.time()
     x, y = train_loader.new_batch()
