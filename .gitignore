@@ -5,3 +5,4 @@ src/simplegpt.egg-info
 dataset
 **/*.txt
 scripts/playground.py
+wandb
