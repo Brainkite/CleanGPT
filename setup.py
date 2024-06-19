@@ -8,7 +8,8 @@ setup(
     install_requires=[
         "transformers[torch]",
         "pytest",
-        "tiktoken"
+        "tiktoken",
+        "wandb"
     ],
     python_requires='>=3.9',
 )

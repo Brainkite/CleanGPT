@@ -1,6 +1,6 @@
 import pytest
 import torch
-from simpleGPT.simpleDataLoader import SimpleDataloader
+from simpleGPT.DistributedDataLoader import SimpleDataloader
 
 class TestSimpleDataloader:
     def test_initialization_with_valid_file(self):
