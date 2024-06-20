@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 config = dict(
     #Dataloader
-    data_dir = "datasets/edu_fineweb10B",
+    data_dir = "/workspace/datasets/edu_fineweb10B",
     total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
     bs = 64, # 64 (A100 80Gb)
     
