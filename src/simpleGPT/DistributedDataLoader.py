@@ -22,6 +22,7 @@ class DistributedDataloader:
     def reset(self):
         # Init position
         self.curr_shard = 0
+        np.random.shuffle(self.shards)
         self.tokens = load_tokens(self.shards[self.curr_shard])
         self.curr_position = self.B * self.T * self.process_rank
         
@@ -44,6 +45,7 @@ class DistributedDataloader:
         
         if self.curr_position + (B * T * self.num_processes + 1) > len(self.tokens):
             self.curr_shard = (self.curr_shard + 1) % len(self.shards)
+            np.random.shuffle(self.shards)
             self.tokens = load_tokens(self.shards[self.curr_shard])
             self.curr_position = self.B * self.T * self.process_rank
         return x, y
