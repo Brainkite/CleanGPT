@@ -272,12 +272,20 @@ for step in range(config.max_steps):
         "dt_ms": dtms,
         "toks/s": tokens_per_sec
         })
-        if master_process and ((step % 5000 == 0) or (step==config.max_steps-1)):
-            logger.info("### Save checkpoint top WandB")
-            model_artifact = wandb.Artifact('gpt-model', type='model')
-            model_path = 'gpt_model.pth'
+        if master_process and (step % 5000 == 0):
+            logger.info("### Save checkpoint to WandB")
+            model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
+            model_path = f'gpt-model-step-{step}.pth'
             torch.save(raw_model.state_dict(), model_path)
             model_artifact.add_file(model_path)
             wandb.log_artifact(model_artifact)
+
+if master_process:
+    logger.info("### Save last checkpoint top WandB")
+    model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
+    model_path = f'gpt-model-step-{step}.pth'
+    torch.save(raw_model.state_dict(), model_path)
+    model_artifact.add_file(model_path)
+    wandb.log_artifact(model_artifact)
     
 if ddp: destroy_process_group()
