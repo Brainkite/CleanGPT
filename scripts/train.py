@@ -19,7 +19,7 @@ assert os.getenv('BS') is not None
 @dataclass
 class Gpt2TrainConfig:
     #Dataloader
-    data_dir = "datasets/edu_fineweb10B"
+    data_dir = "workspace/datasets/edu_fineweb10B"
     total_batch_size = 2**14 # 2**19 # ~ 0.5M tokens
     bs = int(os.getenv('BS')) # 64 (A100 80Gb) 8 (RTX4090)
     
