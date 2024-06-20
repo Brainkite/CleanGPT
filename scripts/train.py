@@ -34,9 +34,9 @@ class Gpt2TrainConfig:
     # LR Scheduler params
     max_lr = 6e-4 * 3 #6e-4
     min_lr_ratio = 0.1 #0.1
-    warmup_steps = 0 #GPT2:715 (100)
-    max_steps = 11 #19_073
-    val_every_n_steps = 5 #100
+    warmup_steps = 100 #GPT2:715 (100)
+    max_steps = 19_073 * 2 #19_073
+    val_every_n_steps = 100 #100
     val_n_steps = 20 #20
     
     # Optimizer
