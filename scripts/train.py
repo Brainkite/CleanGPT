@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 config = dict(
     #Dataloader
     data_dir = "datasets/edu_fineweb10B",
-    total_batch_size = 128*2*2, # 2**19 # ~ 0.5M tokens
-    bs = 2, # 64 (A100 80Gb)
+    total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
+    bs = 64, # 64 (A100 80Gb)
     
     # Model params
-    block_size = 128, #1024
+    block_size = 1024, #1024
     vocab_size = 50304, #50304
     n_layer = 12, #12
     n_head = 12, #12
@@ -29,8 +29,8 @@ config = dict(
     # LR Scheduler params
     max_lr = 6e-4, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 10, #GPT2:715 (100)
-    max_steps = 100, #19_073
+    warmup_steps = 200, #GPT2:715 (200)
+    max_steps = 19_073, #19_073
     
     # Optimizer
     wd = 0.1, #0.1
