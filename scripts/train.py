@@ -16,7 +16,7 @@ config = dict(
     #Dataloader
     data_dir = "/workspace/datasets/edu_fineweb10B",
     total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
-    bs = 64, # 64 (A100 80Gb)
+    bs = 8, # 64 (A100 80Gb)
     
     # Model params
     block_size = 1024, #1024
@@ -29,7 +29,7 @@ config = dict(
     # LR Scheduler params
     max_lr = 6e-4, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 200, #GPT2:715 (200)
+    warmup_steps = 100, #GPT2:715 (200)
     max_steps = 19_073, #19_073
     
     # Optimizer
@@ -37,8 +37,8 @@ config = dict(
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = False, #TRUE
-    compile_model = False, #TRUE
+    autocast_bf16 = True, #TRUE
+    compile_model = True, #TRUE
     use_grad_clip = True, #TRUE
     seed = 1337 #1337
 )
