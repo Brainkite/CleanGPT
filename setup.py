@@ -6,8 +6,8 @@ setup(
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     install_requires=[
-        "transformers[torch]",
-        "datasets",
+        # "transformers[torch]",
+        # "datasets",
         "pytest",
         "tiktoken",
         "wandb",

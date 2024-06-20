@@ -16,7 +16,7 @@ config = dict(
     #Dataloader
     data_dir = "/workspace/datasets/edu_fineweb10B",
     total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
-    bs = 8, # 64 (A100 80Gb)
+    bs = os.getenv('BS'), # 64 (A100 80Gb)
     
     # Model params
     block_size = 1024, #1024
@@ -108,6 +108,7 @@ if master_process:
 train_loader = DistributedDataloader(config["data_dir"], B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
 
 ### CREATE MODEL
+if master_process: logger.info("### Build Model...")
 model = GPT(
     GPTConfig(
         block_size = int(T),
@@ -127,6 +128,7 @@ raw_model = model.module if ddp else model #Contains the model unwrapped
 optimizer = raw_model.configure_optimizers(weight_decay=config['wd'], learning_rate=float(config['max_lr']), device=device)
 
 ### TRAIN LOOP
+if master_process: logger.info("### Start trainning...")
 for step in range(int(config['max_steps'])):
     if master_process: t0 = time.time()
     optimizer.zero_grad()
