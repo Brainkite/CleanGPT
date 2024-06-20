@@ -14,11 +14,12 @@ logger = logging.getLogger(__name__)
 
 config = dict(
     #Dataloader
-    total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
-    bs = 16, #16
+    data_dir = "datasets/edu_fineweb10B",
+    total_batch_size = 128*2*2, # 2**19 # ~ 0.5M tokens
+    bs = 2, # 64 (A100 80Gb)
     
     # Model params
-    block_size = 1024, #1024
+    block_size = 128, #1024
     vocab_size = 50304, #50304
     n_layer = 12, #12
     n_head = 12, #12
@@ -28,16 +29,16 @@ config = dict(
     # LR Scheduler params
     max_lr = 6e-4, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 10, #10
-    max_steps = 100, #100
+    warmup_steps = 10, #GPT2:715 (100)
+    max_steps = 100, #19_073
     
     # Optimizer
     wd = 0.1, #0.1
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = True, #TRUE
-    compile_model = True, #TRUE
+    autocast_bf16 = False, #TRUE
+    compile_model = False, #TRUE
     use_grad_clip = True, #TRUE
     seed = 1337 #1337
 )
@@ -68,7 +69,7 @@ if master_process:
     logger.info(f'### DDP enabled: {ddp}')
     logger.info(f"### World size: {ddp_world_size}")
     wandb.init(
-        project="SimpleGPT2_DDP_train",
+        project="SimpleGPT2_FWedu10B_train",
         config = config
     )
     logger.info("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in config.items()])
@@ -104,7 +105,7 @@ if master_process:
     wandb.config['grad_accum_steps'] = grad_accum_steps
     wandb.config['ddp_world_size'] = ddp_world_size
     logger.info(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
-train_loader = DistributedDataloader("dataset/tiny_shakesprear.txt", B, T, process_rank=ddp_rank, num_processes=ddp_world_size)
+train_loader = DistributedDataloader(config["data_dir"], B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
 
 ### CREATE MODEL
 model = GPT(
