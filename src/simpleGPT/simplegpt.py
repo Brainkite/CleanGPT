@@ -29,12 +29,13 @@ class CasualSelfAttention(nn.Module):
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         setattr(self.c_proj, 'GPT_SCALE_INIT', 1.)
         
-        # Create attention lower-triangular mask to keep only attn score with previous tokens
-        self.register_buffer("bias",
-                             torch.tril(
-                                 torch.ones(config.block_size, config.block_size)
-                             ).view(1,1,config.block_size, config.block_size)
-                             )
+        if not self.use_flash_attn:
+            # Create attention lower-triangular mask to keep only attn score with previous tokens
+            self.register_buffer("bias",
+                                torch.tril(
+                                    torch.ones(config.block_size, config.block_size)
+                                ).view(1,1,config.block_size, config.block_size)
+                                )
     
     def forward(self, x):
         B,T,C = x.size() # batch_size, seg_length, n_embeddings
@@ -130,7 +131,7 @@ class GPT(nn.Module):
     
     def forward(self, idx, targets=None):
         B,T = idx.size()
-        assert T <= self.config.block_size
+        assert T <= self.config.block_size, f"{T}, {self.config.block_size}"
         
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
         pos_emb = self.transformer.wpe(pos) # (T, n_embd)

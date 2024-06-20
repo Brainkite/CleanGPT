@@ -17,7 +17,9 @@ class DistributedDataloader:
         assert split in {'train', 'val'}
         
         self.load_dataset()
+        self.reset()
         
+    def reset(self):
         # Init position
         self.curr_shard = 0
         self.tokens = load_tokens(self.shards[self.curr_shard])
