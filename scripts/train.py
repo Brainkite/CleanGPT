@@ -189,7 +189,6 @@ for step in range(config.max_steps):
         num_correct_norm = 0
         num_total = 0
         for i, example in zip(range(5000), iterate_examples("val")):
-            if master_process: logger.info(f'### Hellaswag example {i}')
             # only process examples where i % ddp_world_size == ddp_rank
             if i % ddp_world_size != ddp_rank:
                 continue
