@@ -34,9 +34,9 @@ class Gpt2TrainConfig:
     use_flash_attn = True #True
     
     # LR Scheduler params
-    max_lr = 6e-4 * 3 #6e-4
+    max_lr = 6e-4 #6e-4
     min_lr_ratio = 0.1 #0.1
-    warmup_steps = 100 #GPT2:715 (100)
+    warmup_steps = 715 #GPT2:715 (100)
     max_steps = 19_073 #19_073
     val_every_n_steps = 100 #100
     val_n_steps = 20 #20
@@ -192,7 +192,7 @@ for step in range(config.max_steps):
         if master_process: logger.info('### Hellaswag evaluation')
         num_correct_norm = 0
         num_total = 0
-        for i, example in tqdm(zip(range(5000), iterate_examples("val")), total=5000):
+        for i, example in tqdm(enumerate(iterate_examples("val")), total=10_042):
             # only process examples where i % ddp_world_size == ddp_rank
             if i % ddp_world_size != ddp_rank:
                 continue

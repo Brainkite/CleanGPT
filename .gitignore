@@ -10,3 +10,4 @@ wandb
 **/*.pth
 
 vastai_script.sh
+test.ipynb
