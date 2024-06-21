@@ -183,7 +183,7 @@ for step in range(config.max_steps):
         if ddp: dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
         if master_process:
             logger.info(f"Validation loss: {val_loss_accum:04f}")
-            wandb.log({"step": step, "loss": val_loss_accum})
+            wandb.log({"step": step, "val_loss": val_loss_accum})
     
     ### EVAL ON HELLASWAG
     if (step+1 % config.val_every_n_steps == 0 or (step==config.max_steps-1)) and (not config.compile_model):
