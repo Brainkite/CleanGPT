@@ -11,6 +11,7 @@ from simpleGPT.simplegpt import GPT, GPTConfig
 from simpleGPT.DistributedDataLoader import DistributedDataloader
 import logging
 import wandb
+from tqdm import tqdm
 from hellaswag import render_example, iterate_examples
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -160,10 +161,11 @@ def get_most_likely_row(tokens, mask, logits):
 if master_process: logger.info("### Start trainning...")
 dt_hist = []
 for step in range(config.max_steps):
+    final_step = step == config.max_steps
     if master_process: t0 = time.time()
     
     ### VALIDATION
-    if (step+1 % config.val_every_n_steps == 0) or (step==config.max_steps-1):
+    if (step % config.val_every_n_steps == 0) or final_step:
         if master_process: logger.info('### Validation')
         model.eval()
         val_loader.reset()
@@ -186,11 +188,11 @@ for step in range(config.max_steps):
             wandb.log({"step": step, "val_loss": val_loss_accum})
     
     ### EVAL ON HELLASWAG
-    if (step+1 % config.val_every_n_steps == 0 or (step==config.max_steps-1)) and (not config.compile_model):
+    if (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
         if master_process: logger.info('### Hellaswag evaluation')
         num_correct_norm = 0
         num_total = 0
-        for i, example in zip(range(5000), iterate_examples("val")):
+        for i, example in tqdm(zip(range(5000), iterate_examples("val")), total=5000):
             # only process examples where i % ddp_world_size == ddp_rank
             if i % ddp_world_size != ddp_rank:
                 continue
@@ -276,7 +278,7 @@ for step in range(config.max_steps):
         "dt_ms": dtms,
         "toks/s": tokens_per_sec
         })
-        if master_process and (step % 5000 == 0):
+        if master_process and (step % 5000 == 0) and step > 0:
             logger.info("### Save checkpoint to WandB")
             model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
             model_path = f'gpt-model-step-{step}.pth'
