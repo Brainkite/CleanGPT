@@ -2,6 +2,7 @@ import sys, os, time
 from dataclasses import dataclass, asdict
 import math
 import torch
+import numpy as np
 from torch.nn import functional as F
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -157,6 +158,7 @@ def get_most_likely_row(tokens, mask, logits):
 
 ### TRAIN LOOP
 if master_process: logger.info("### Start trainning...")
+dt_hist = []
 for step in range(config.max_steps):
     if master_process: t0 = time.time()
     
@@ -259,10 +261,13 @@ for step in range(config.max_steps):
     if master_process:
         t1 = time.time()
         dt = (t1-t0)
+        dt_hist.append(dt)
+        dt = dt[-10:]
+        eta = (config.max_steps - step) * np.mean(dt) / 60 / 60
         tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
         tokens_per_sec = tokens_processed / dt
         dtms = dt*1000
-        logger.info(f"Step {step}: loss: {loss_accum:.6f} | lr: {lr:4e} | norm: {norm:.4f} | dt: {dtms:.2f}ms | tok/s: {tokens_per_sec:.02f} | toks: {tokens_processed}")
+        logger.info(f"Step {step}: loss: {loss_accum:.6f} | lr: {lr:4e} | norm: {norm:.4f} | dt: {dtms:.2f}ms | tok/s: {tokens_per_sec:.02f} | remain: {eta:.2f} h")
         wandb.log({
         "step": step,
         "loss": loss_accum,
