@@ -112,8 +112,8 @@ B,T = config.bs, config.block_size
 assert total_batch_size % (B * T * ddp_world_size) == 0, total_batch_size / (B * T * ddp_world_size)
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
-    wandb.config['grad_accum_steps'] = grad_accum_steps
-    wandb.config['ddp_world_size'] = ddp_world_size
+    # wandb.config['grad_accum_steps'] = grad_accum_steps
+    # wandb.config['ddp_world_size'] = ddp_world_size
     logger.info(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
 train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
 val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val')
