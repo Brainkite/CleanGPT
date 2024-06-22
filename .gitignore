@@ -11,3 +11,4 @@ wandb
 
 vastai_script.sh
 test.ipynb
+scripts/update.py

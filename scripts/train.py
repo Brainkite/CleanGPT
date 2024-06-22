@@ -1,5 +1,5 @@
 import sys, os, time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 import math
 import torch
 import numpy as np
@@ -7,6 +7,7 @@ from torch.nn import functional as F
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
+from simpleGPT.Gpt2TrainConfig import Gpt2TrainConfig
 from simpleGPT.simplegpt import GPT, GPTConfig
 from simpleGPT.DistributedDataLoader import DistributedDataloader
 import logging
@@ -18,40 +19,39 @@ logger = logging.getLogger(__name__)
 
 assert os.getenv('BS') is not None
 
-@dataclass
-class Gpt2TrainConfig:
+
+config = Gpt2TrainConfig(
     #Dataloader
-    data_dir = "/workspace/datasets/edu_fineweb10B"
-    total_batch_size = 2**19 # 2**19 # ~ 0.5M tokens
-    bs = int(os.getenv('BS')) # 64 (A100 80Gb) 8 (RTX4090)
+    data_dir = "/workspace/datasets/edu_fineweb10B",
+    total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
+    bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
     
     # Model params
-    block_size = 1024 #1024
-    vocab_size = 50304 #50304
-    n_layer = 12 #12
-    n_head = 12 #12
-    n_embd = 768 #768
-    use_flash_attn = True #True
+    block_size = 1024, #1024
+    vocab_size = 50304, #50304
+    n_layer = 12 ,#12
+    n_head = 12, #12
+    n_embd = 768, #768
+    use_flash_attn = True, #True
     
     # LR Scheduler params
-    max_lr = 6e-4 #6e-4
-    min_lr_ratio = 0.1 #0.1
-    warmup_steps = 715 #GPT2:715 (100)
-    max_steps = 19_073 #19_073
-    val_every_n_steps = 100 #100
-    val_n_steps = 20 #20
+    max_lr = 6e-4, #6e-4
+    min_lr_ratio = 0.1, #0.1
+    warmup_steps = 715, #GPT2:715 (100)
+    max_steps = 19_073, #19_073
+    val_every_n_steps = 100, #100
+    val_n_steps = 20, #20
     
     # Optimizer
-    wd = 0.1 #0.1
+    wd = 0.1, #0.1
     
     # Other
-    matmul_precision = 1 #1
-    autocast_bf16 = True #TRUE
-    compile_model = False #False
-    use_grad_clip = True #TRUE
-    seed = 1337 #1337
-
-config = Gpt2TrainConfig()
+    matmul_precision = 1, #1
+    autocast_bf16 = True, #TRUE
+    compile_model = False, #False
+    use_grad_clip = True, #TRUE
+    seed = 1337, #1337
+)
 
 # SETUP DDP
 ddp = int(os.environ.get('RANK', -1)) != -1 # Check if current process is in ddp run
@@ -112,8 +112,8 @@ B,T = config.bs, config.block_size
 assert total_batch_size % (B * T * ddp_world_size) == 0, total_batch_size / (B * T * ddp_world_size)
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
-    # wandb.config['grad_accum_steps'] = grad_accum_steps
-    # wandb.config['ddp_world_size'] = ddp_world_size
+    wandb.config['grad_accum_steps'] = grad_accum_steps
+    wandb.config['ddp_world_size'] = ddp_world_size
     logger.info(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
 train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
 val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val')
