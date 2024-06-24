@@ -136,7 +136,7 @@ if ddp: model = DDP(module=model, device_ids=[ddp_local_rank])
 raw_model = model.module if ddp else model #Contains the model unwrapped 
 
 ### OPTIMIZER
-optimizer = raw_model.configure_optimizers(weight_decay=config.wd , learning_rate=config.max_lr, device=device)
+optimizer = raw_model.configure_optimizers(weight_decay=config.wd , learning_rate=config.max_lr, device_type=device_type)
 
 def get_most_likely_row(tokens, mask, logits):
     # evaluate the autoregressive loss at all positions
