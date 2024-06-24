@@ -39,7 +39,7 @@ config = Gpt2TrainConfig(
     min_lr_ratio = 0.1, #0.1
     warmup_steps = 715, #GPT2:715 (100)
     max_steps = 19_073, #19_073
-    val_every_n_steps = 100, #100
+    val_every_n_steps = 50, #100
     val_n_steps = 20, #20
     
     # Optimizer
@@ -79,7 +79,7 @@ if master_process:
     logger.info(f'### DDP enabled: {ddp}')
     logger.info(f"### World size: {ddp_world_size}")
     wandb.init(
-        project="SimpleGPT2_FWedu10B_train",
+        project="SimpleGPT2_compare_impl",
         config = asdict(config)
     )
     logger.info("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in asdict(config).items()])
@@ -160,8 +160,9 @@ def get_most_likely_row(tokens, mask, logits):
 ### TRAIN LOOP
 if master_process: logger.info("### Start trainning...")
 dt_hist = []
-for step in range(config.max_steps):
-    final_step = step == config.max_steps
+# for step in range(config.max_steps):
+for step in range(100):
+    final_step = step == config.max_steps-1
     if master_process: t0 = time.time()
     
     ### VALIDATION
@@ -230,6 +231,8 @@ for step in range(config.max_steps):
     for accum_step in range(int(grad_accum_steps)):
         x, y = train_loader.new_batch()
         x, y = x.to(device), y.to(device)
+        if ddp:
+            model.require_backward_grad_sync = (accum_step == grad_accum_steps - 1)
         if config.autocast_bf16 :
             with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                 logits, loss = model(x, y)
@@ -239,10 +242,6 @@ for step in range(config.max_steps):
         # only across the bini-batch but not across the full accumulated batch
         loss = loss / grad_accum_steps
         loss_accum += loss.detach()
-        if ddp:
-            # loss.backward will deposit grads AND sync across GPUs
-            # so we disable grad sync untill last accum_step
-            model.require_backward_grad_sync = (accum_step == grad_accum_steps-1)
         loss.backward()
     
     ### GRAD CLIP
@@ -252,7 +251,7 @@ for step in range(config.max_steps):
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))
         
     ### OPTIM STEP
-    lr = get_lr(step, config.max_lr, min_lr, config.warmup_steps , config.max_steps )
+    lr = get_lr(step, config.max_lr, min_lr, config.warmup_steps , config.max_steps)
     for param_group in optimizer.param_groups:
         param_group['lr']  = lr
     optimizer.step()
@@ -264,7 +263,7 @@ for step in range(config.max_steps):
         t1 = time.time()
         dt = (t1-t0)
         dt_hist.append(dt)
-        dt_hist = dt_hist[-200:]
+        dt_hist = dt_hist[-20:]
         eta = (config.max_steps - step) * np.mean(dt_hist) / 60 / 60
         tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
         tokens_per_sec = tokens_processed / dt
@@ -293,5 +292,6 @@ if master_process:
     torch.save(raw_model.state_dict(), model_path)
     model_artifact.add_file(model_path)
     wandb.log_artifact(model_artifact)
+    wandb.finish()
     
 if ddp: destroy_process_group()

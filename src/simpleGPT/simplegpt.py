@@ -27,7 +27,7 @@ class CasualSelfAttention(nn.Module):
         
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        setattr(self.c_proj, 'GPT_SCALE_INIT', 1.)
+        self.c_proj.GPT_SCALE_INIT = 1.
         
         if not self.use_flash_attn:
             # Create attention lower-triangular mask to keep only attn score with previous tokens
@@ -72,7 +72,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
-        setattr(self.c_proj, 'GPT_SCALE_INIT', 1.)
+        self.c_proj.GPT_SCALE_INIT = 1.
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -100,14 +100,13 @@ class GPT(nn.Module):
         super().__init__()
         self.config = config
 
-        self.transformer = nn.ModuleDict(
-            dict(
-                wte = nn.Embedding(config.vocab_size, config.n_embd),
-                wpe = nn.Embedding(config.block_size, config.n_embd),
-                h = nn.ModuleList(
-                    [Block(config) for _ in range(config.n_layer)]
-                ),
-                ln_f = nn.LayerNorm(config.n_embd)
+        self.transformer = nn.ModuleDict( dict(
+            wte = nn.Embedding(config.vocab_size, config.n_embd),
+            wpe = nn.Embedding(config.block_size, config.n_embd),
+            h = nn.ModuleList(
+                [Block(config) for _ in range(config.n_layer)]
+            ),
+            ln_f = nn.LayerNorm(config.n_embd)
             )
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias = False)
@@ -151,10 +150,10 @@ class GPT(nn.Module):
                 )
         return logits, loss
     
-    def configure_optimizers(self, weight_decay, learning_rate, device):
+    def configure_optimizers(self, weight_decay, learning_rate, device_type):
         param_dict = {pn: p for pn,p in self.named_parameters() if p.requires_grad}
         # Apply wd only to matmul layers (linear, embedding), not to biases and layernorm.
-        decay_params = [p for n,p in param_dict.items() if p.dim()>=2]
+        decay_params = [p for n,p in param_dict.items() if p.dim() >= 2]
         nodecay_params = [p for n,p in param_dict.items() if p.dim() < 2]
         optim_groups = [
             {'params': decay_params, 'weight_decay': weight_decay},
@@ -166,7 +165,7 @@ class GPT(nn.Module):
         print(f"Num non-decayed param tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         
         fused_avilable = 'fused' in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_avilable and 'cuda' in device
+        use_fused = fused_avilable and 'cuda' in device_type
         print(f"Using fused AdamW: {use_fused}")
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
         return optimizer

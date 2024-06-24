@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 def load_tokens(filename):
-    toks = torch.tensor(np.load(filename).astype(np.int64), dtype=torch.long)
+    toks = torch.tensor(np.load(filename), dtype=torch.long)
     return toks
 
 class DistributedDataloader:
@@ -37,8 +37,8 @@ class DistributedDataloader:
     def new_batch(self):
         B, T = self.B, self.T
         buf = self.tokens[self.curr_position : self.curr_position + B*T+1]
-        x = buf[:-1].view(B,T)
-        y = buf[1:].view(B,T)
+        x = (buf[:-1]).view(B, T)
+        y = (buf[1:]).view(B, T)
         
         self.curr_position += B * T * self.num_processes
         
