@@ -161,7 +161,7 @@ def get_most_likely_row(tokens, mask, logits):
 if master_process: logger.info("### Start trainning...")
 dt_hist = []
 # for step in range(config.max_steps):
-for step in range(100):
+for step in range(7000):
     final_step = step == config.max_steps-1
     if master_process: t0 = time.time()
     
@@ -271,7 +271,7 @@ for step in range(100):
         logger.info(f"Step {step}: loss: {loss_accum:.6f} | lr: {lr:4e} | norm: {norm:.4f} | dt: {dtms:.2f}ms | tok/s: {tokens_per_sec:.02f} | remain: {eta:.2f} h")
         wandb.log({
         "step": step,
-        "loss": loss_accum,
+        "train_loss": loss_accum,
         "lr": lr,
         "norm": norm,
         "dt_ms": dtms,
