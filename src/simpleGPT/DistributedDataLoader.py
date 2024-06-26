@@ -1,51 +1,59 @@
 import os
 import torch
 import numpy as np
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 def load_tokens(filename):
-    toks = torch.tensor(np.load(filename), dtype=torch.long)
-    return toks
+    return torch.tensor(np.load(filename), dtype=torch.long)
 
-class DistributedDataloader:
-    def __init__(self, data_dir, B, T, process_rank=0, num_processes=1, split='train'):
+class DistributedDataset(Dataset):
+    def __init__(self, data_dir, T, split='train'):
         self.data_dir = data_dir
-        self.B = B
         self.T = T
-        self.process_rank = process_rank
-        self.num_processes = num_processes
         self.split = split
         assert split in {'train', 'val'}
         
         self.load_dataset()
-        self.reset()
-        
-    def reset(self):
-        # Init position
-        self.curr_shard = 0
-        self.tokens = load_tokens(self.shards[self.curr_shard])
-        self.curr_position = self.B * self.T * self.process_rank
         
     def load_dataset(self):
         fns = os.listdir(self.data_dir)
         fns = sorted([fn for fn in fns if self.split in fn])
         fns = [os.path.join(self.data_dir, fn) for fn in fns]
-        self.shards = fns
-        assert len(fns)>0
-        if self.process_rank == 0:
-            print(f"Found {len(fns)} shards for {self.split} split")
-    
-    def new_batch(self):
-        B, T = self.B, self.T
-        buf = self.tokens[self.curr_position : self.curr_position + B*T+1]
-        x = (buf[:-1]).view(B, T)
-        y = (buf[1:]).view(B, T)
+        assert len(fns) > 0
+        print(f"Found {len(fns)} shards for {self.split} split")
         
-        self.curr_position += B * T * self.num_processes
+        # Pre-load all shards into RAM
+        self.tokens = torch.cat([load_tokens(shard) for shard in fns])
+        print(f"Loaded {len(self.tokens)} tokens into RAM")
         
-        if self.curr_position + (B * T * self.num_processes + 1) > len(self.tokens):
-            self.curr_shard = (self.curr_shard + 1) % len(self.shards)
-            self.tokens = load_tokens(self.shards[self.curr_shard])
-            self.curr_position = self.B * self.T * self.process_rank
+        # Calculate the number of non-overlapping sequences
+        self.num_samples = len(self.tokens) // self.T
+
+    def __getitem__(self, idx):
+        start_idx = idx * self.T
+        end_idx = start_idx + self.T
+        x = self.tokens[start_idx : end_idx]
+        y = self.tokens[start_idx + 1 : end_idx + 1]
         return x, y
-        
-        
+
+    def __len__(self):
+        return (len(self.tokens) - 1) // self.T
+
+def create_distributed_dataloader(data_dir, B, T, rank, world_size, split='train'):
+    dataset = DistributedDataset(data_dir, T, split)
+    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=(split == 'train'))
+    
+    dataloader = DataLoader(
+        dataset,
+        batch_size = B,
+        sampler = sampler,
+        num_workers = int(os.getenv('NGPUS')) * 6,
+        pin_memory = True,
+        prefetch_factor = 4,
+        persistent_workers = True
+    )
+    
+    return dataloader
+
+

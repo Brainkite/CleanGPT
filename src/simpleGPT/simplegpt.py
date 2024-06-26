@@ -4,6 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchtune.modules import RotaryPositionalEmbeddings
 
 @dataclass
 class GPTConfig:
@@ -13,24 +14,29 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     use_flash_attn: bool = True
+    use_rope: bool = True  # New field for using rotary embeddings
 
 class CasualSelfAttention(nn.Module):
     """
-    Perform a batched multi-head attention
+    Perform a batched multi-head attention with rotary embeddings
     """
     def __init__(self, config: GPTConfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         self.n_head = config.n_head
         self.n_embd = config.n_embd
+        self.head_dim = config.n_embd // config.n_head
         self.use_flash_attn = config.use_flash_attn
+        self.use_rope = config.use_rope
         
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         self.c_proj.GPT_SCALE_INIT = 1.
         
+        if self.use_rope:
+            self.rope = RotaryPositionalEmbeddings(dim=self.head_dim, max_seq_len=config.block_size)
+        
         if not self.use_flash_attn:
-            # Create attention lower-triangular mask to keep only attn score with previous tokens
             self.register_buffer("bias",
                                 torch.tril(
                                     torch.ones(config.block_size, config.block_size)
@@ -38,30 +44,27 @@ class CasualSelfAttention(nn.Module):
                                 )
     
     def forward(self, x):
-        B,T,C = x.size() # batch_size, seg_length, n_embeddings
+        B, T, C = x.size() # batch_size, seq_length, n_embeddings
 
-        #Compute batched multihead Q,K,V
-        qkv = self.c_attn(x) # (bs, seq, 3*n_embd)
-
-        # Organize q,k,v by att heads
+        qkv = self.c_attn(x) # (B, T, 3*n_embd)
         q, k, v = qkv.split(self.n_embd, dim=2)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2) # (B, n_head, T, head_dim)
+        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+
+        if self.use_rope:
+            q = self.rope(q)
+            k = self.rope(k)
 
         if self.use_flash_attn:
             y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         else:
-            # (bs, nh) are in batch dims so we can batch compute att scores per head
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) # (bs, nh, seq, seq)
-            # Discard upper triangular att scores
+            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
-            y = att @ v # (bs, nh, seq, hs)
+            y = att @ v # (B, n_head, T, head_dim)
         
-        # Catenate all heads (bs, nh, seq, hs)-> (bs, seq, n_embd)
-        y = y.transpose(1,2).contiguous().view(B,T,C)
-
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.c_proj(y)
         return y
 

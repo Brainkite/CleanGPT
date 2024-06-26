@@ -14,6 +14,7 @@ class Gpt2TrainConfig:
     n_head: int
     n_embd: int
     use_flash_attn: bool
+    use_rope: bool
     
     # LR Scheduler params
     max_lr: float

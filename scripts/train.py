@@ -3,27 +3,27 @@ from dataclasses import asdict
 import math
 import torch
 import numpy as np
+from torch.utils.data import DataLoader
 from torch.nn import functional as F
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from simpleGPT.Gpt2TrainConfig import Gpt2TrainConfig
 from simpleGPT.simplegpt import GPT, GPTConfig
-from simpleGPT.DistributedDataLoader import DistributedDataloader
+# from simpleGPT.SimpleDataLoader import SimpleDataloader
+from simpleGPT.DistributedDataLoader import DistributedDataset, create_distributed_dataloader
 import logging
 import wandb
 from tqdm import tqdm
 from hellaswag import render_example, iterate_examples
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 assert os.getenv('BS') is not None
 
 
 config = Gpt2TrainConfig(
     #Dataloader
-    data_dir = "/workspace/datasets/edu_fineweb10B",
-    total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
+    data_dir = "/workspaces/datasets/edu_fineweb10B",
+    total_batch_size = 2048, # 2**19 # ~ 0.5M tokens
     bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
     
     # Model params
@@ -33,21 +33,22 @@ config = Gpt2TrainConfig(
     n_head = 12, #12
     n_embd = 768, #768
     use_flash_attn = True, #True
+    use_rope = False,
     
     # LR Scheduler params
     max_lr = 6e-4, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 715, #GPT2:715 (100)
-    max_steps = 19_073, #19_073
-    val_every_n_steps = 50, #100
-    val_n_steps = 20, #20
+    warmup_steps = 1, #GPT2:715 (100)
+    max_steps = 10, #19_073
+    val_every_n_steps = 2, #100
+    val_n_steps = 2, #20
     
     # Optimizer
     wd = 0.1, #0.1
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = True, #TRUE
+    autocast_bf16 = False, #TRUE
     compile_model = False, #False
     use_grad_clip = True, #TRUE
     seed = 1337, #1337
@@ -72,17 +73,18 @@ else:
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda"
-    logger.info(f"Using device: {device}")
+    print(f"Using device: {device}")
 device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 if master_process:
-    logger.info(f'### DDP enabled: {ddp}')
-    logger.info(f"### World size: {ddp_world_size}")
+    print(f'### DDP enabled: {ddp}')
+    print(f"### World size: {ddp_world_size}")
+    print(f'### Init WandB run ...')
     wandb.init(
         project="SimpleGPT2_compare_impl",
         config = asdict(config)
     )
-    logger.info("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in asdict(config).items()])
+    print("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in asdict(config).items()])
 
 ### SEED
 torch.manual_seed(config.seed)
@@ -96,7 +98,7 @@ torch.set_float32_matmul_precision(matmul_prec_dict[config.matmul_precision])
 min_lr = config.max_lr * config.min_lr_ratio
 def get_lr(it, max_lr, min_lr, warmup_steps, max_steps):
     if it < warmup_steps:
-        return (it+1)/warmup_steps * max_lr
+        return max_lr * (it+1) / warmup_steps
     
     if it > max_steps:
         return min_lr
@@ -107,6 +109,7 @@ def get_lr(it, max_lr, min_lr, warmup_steps, max_steps):
     return min_lr + coeff * (max_lr - min_lr)
 
 ### DATALOADER
+if master_process: print("### Dataloaders...")
 total_batch_size = config.total_batch_size
 B,T = config.bs, config.block_size
 assert total_batch_size % (B * T * ddp_world_size) == 0, total_batch_size / (B * T * ddp_world_size)
@@ -114,12 +117,12 @@ grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
     wandb.config['grad_accum_steps'] = grad_accum_steps
     wandb.config['ddp_world_size'] = ddp_world_size
-    logger.info(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
-train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
-val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val')
+    print(f"#### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
+train_loader = create_distributed_dataloader(config.data_dir, B=B, T=T, rank=ddp_rank, world_size=ddp_world_size, split='train')
+val_loader = create_distributed_dataloader(config.data_dir, B=B, T=T, rank=ddp_rank, world_size=ddp_world_size, split='val')
 
 ### CREATE MODEL
-if master_process: logger.info("### Build Model...")
+if master_process: print("### Build Model...")
 model = GPT(
     GPTConfig(
         block_size = config.block_size,
@@ -127,7 +130,8 @@ model = GPT(
         n_layer = config.n_layer ,
         n_head = config.n_head,
         n_embd = config.n_embd,
-        use_flash_attn = config.use_flash_attn, 
+        use_flash_attn = config.use_flash_attn,
+        use_rope = config.use_rope
         )
     )
 model.to(device)
@@ -136,6 +140,7 @@ if ddp: model = DDP(module=model, device_ids=[ddp_local_rank])
 raw_model = model.module if ddp else model #Contains the model unwrapped 
 
 ### OPTIMIZER
+if master_process: print("### Optimizer...")
 optimizer = raw_model.configure_optimizers(weight_decay=config.wd , learning_rate=config.max_lr, device_type=device_type)
 
 def get_most_likely_row(tokens, mask, logits):
@@ -158,22 +163,23 @@ def get_most_likely_row(tokens, mask, logits):
     return pred_norm
 
 ### TRAIN LOOP
-if master_process: logger.info("### Start trainning...")
+if master_process: print("### Start trainning...")
 dt_hist = []
-# for step in range(config.max_steps):
-for step in range(7000):
+train_iterator = iter(train_loader)
+for step in range(config.max_steps):
+    print("step",step)
     final_step = step == config.max_steps-1
     if master_process: t0 = time.time()
     
     ### VALIDATION
     if (step % config.val_every_n_steps == 0) or final_step:
-        if master_process: logger.info('### Validation')
+        if master_process: print('### Validation')
         model.eval()
-        val_loader.reset()
+        val_iterator = iter(val_loader)
         with torch.no_grad():
             val_loss_accum = .0
-            for _ in range(config.val_n_steps):
-                x, y = val_loader.new_batch()
+            for i in range(min(config.val_n_steps, len(val_loader))):
+                x, y = next(val_iterator)
                 x, y = x.to(device), y.to(device)
                 if config.autocast_bf16 :
                     with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
@@ -185,12 +191,12 @@ for step in range(7000):
             
         if ddp: dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
         if master_process:
-            logger.info(f"Validation loss: {val_loss_accum:04f}")
+            print(f"Validation loss: {val_loss_accum:04f}")
             wandb.log({"step": step, "val_loss": val_loss_accum})
     
     ### EVAL ON HELLASWAG
     if (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
-        if master_process: logger.info('### Hellaswag evaluation')
+        if master_process: print('### Hellaswag evaluation')
         num_correct_norm = 0
         num_total = 0
         for i, example in tqdm(enumerate(iterate_examples("val")), total=10_042):
@@ -226,10 +232,10 @@ for step in range(7000):
 
     ### TRAIN GRAD ACCUM LOOP
     model.train()
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
     loss_accum = .0
-    for accum_step in range(int(grad_accum_steps)):
-        x, y = train_loader.new_batch()
+    for accum_step in range(grad_accum_steps):
+        x, y = next(train_iterator)
         x, y = x.to(device), y.to(device)
         if ddp:
             model.require_backward_grad_sync = (accum_step == grad_accum_steps - 1)
@@ -265,10 +271,10 @@ for step in range(7000):
         dt_hist.append(dt)
         dt_hist = dt_hist[-20:]
         eta = (config.max_steps - step) * np.mean(dt_hist) / 60 / 60
-        tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
+        tokens_processed = B * T * grad_accum_steps * ddp_world_size
         tokens_per_sec = tokens_processed / dt
         dtms = dt*1000
-        logger.info(f"Step {step}: loss: {loss_accum:.6f} | lr: {lr:4e} | norm: {norm:.4f} | dt: {dtms:.2f}ms | tok/s: {tokens_per_sec:.02f} | remain: {eta:.2f} h")
+        print(f"Step {step}: loss: {loss_accum:.6f} | lr: {lr:4e} | norm: {norm:.4f} | dt: {dtms:.2f}ms | tok/s: {tokens_per_sec:.02f} | remain: {eta:.2f} h")
         wandb.log({
         "step": step,
         "train_loss": loss_accum,
@@ -278,7 +284,7 @@ for step in range(7000):
         "toks/s": tokens_per_sec
         })
         if master_process and (step % 5000 == 0) and step > 0:
-            logger.info("### Save checkpoint to WandB")
+            print("### Save checkpoint to WandB")
             model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
             model_path = f'gpt-model-step-{step}.pth'
             torch.save(raw_model.state_dict(), model_path)
@@ -286,7 +292,7 @@ for step in range(7000):
             wandb.log_artifact(model_artifact)
 
 if master_process:
-    logger.info("### Save last checkpoint top WandB")
+    print("### Save last checkpoint top WandB")
     model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
     model_path = f'gpt-model-step-{step}.pth'
     torch.save(raw_model.state_dict(), model_path)
