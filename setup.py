@@ -7,6 +7,7 @@ setup(
     packages=find_packages(where="src"),
     install_requires=[
         "transformers[torch]",
+        "torchtune",
         "datasets",
         "pytest",
         "tiktoken",

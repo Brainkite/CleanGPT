@@ -4,6 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchtune.modules import RotaryPositionalEmbeddings
 
 @dataclass
 class GPTConfig:
@@ -13,6 +14,7 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     use_flash_attn: bool = True
+    use_rope: bool = False
 
 class CasualSelfAttention(nn.Module):
     """
@@ -24,10 +26,14 @@ class CasualSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.use_flash_attn = config.use_flash_attn
+        self.use_rope = config.use_rope
         
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         self.c_proj.GPT_SCALE_INIT = 1.
+        
+        if self.use_rope:
+            self.rope = RotaryPositionalEmbeddings(dim=self.head_dim, max_seq_len=config.block_size)
         
         if not self.use_flash_attn:
             # Create attention lower-triangular mask to keep only attn score with previous tokens
@@ -48,6 +54,10 @@ class CasualSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1,2) # (bs, nh, seq, hs)
+
+        if self.use_rope:
+            q = self.rope(q)
+            k = self.rope(k)
 
         if self.use_flash_attn:
             y = F.scaled_dot_product_attention(q, k, v, is_causal=True)

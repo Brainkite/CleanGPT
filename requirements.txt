@@ -1,4 +1,5 @@
 transformers[torch]
+torchtune
 datasets
 tqdm
 pytest
