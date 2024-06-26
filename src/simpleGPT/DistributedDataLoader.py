@@ -24,6 +24,7 @@ class DistributedDataset(Dataset):
         print(f"Found {len(fns)} shards for {self.split} split")
         
         # Pre-load all shards into RAM
+        print('### Loading shards in one tensor...')
         self.tokens = torch.cat([load_tokens(shard) for shard in fns])
         print(f"Loaded {len(self.tokens)} tokens into RAM")
         
