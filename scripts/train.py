@@ -23,7 +23,7 @@ assert os.getenv('BS') is not None
 config = Gpt2TrainConfig(
     #Dataloader
     data_dir = "/workspaces/datasets/edu_fineweb10B",
-    total_batch_size = 2048, # 2**19 # ~ 0.5M tokens
+    total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
     bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
     
     # Model params
@@ -38,17 +38,17 @@ config = Gpt2TrainConfig(
     # LR Scheduler params
     max_lr = 6e-4, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 1, #GPT2:715 (100)
-    max_steps = 10, #19_073
-    val_every_n_steps = 2, #100
-    val_n_steps = 2, #20
+    warmup_steps = 715, #GPT2:715 (100)
+    max_steps = 19_073, #19_073
+    val_every_n_steps = 200, #100
+    val_n_steps = 20, #20
     
     # Optimizer
     wd = 0.1, #0.1
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = False, #TRUE
+    autocast_bf16 = True, #TRUE
     compile_model = False, #False
     use_grad_clip = True, #TRUE
     seed = 1337, #1337
