@@ -269,7 +269,7 @@ for step in range(config.max_steps):
         t1 = time.time()
         dt = (t1-t0)
         dt_hist.append(dt)
-        dt_hist = dt_hist[-20:]
+        dt_hist = dt_hist[-10:]
         eta = (config.max_steps - step) * np.mean(dt_hist) / 60 / 60
         tokens_processed = B * T * grad_accum_steps * ddp_world_size
         tokens_per_sec = tokens_processed / dt
