@@ -73,17 +73,17 @@ else:
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda"
-    logger.info(f"Using device: {device}")
+    print(f"Using device: {device}")
 device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 if master_process:
-    logger.info(f'### DDP enabled: {ddp}')
-    logger.info(f"### World size: {ddp_world_size}")
+    print(f'### DDP enabled: {ddp}')
+    print(f"### World size: {ddp_world_size}")
     wandb.init(
         project="SimpleGPT2_compare_impl",
         config = asdict(config)
     )
-    logger.info("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in asdict(config).items()])
+    print("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in asdict(config).items()])
 
 ### SEED
 torch.manual_seed(config.seed)
@@ -115,12 +115,12 @@ grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
     wandb.config['grad_accum_steps'] = grad_accum_steps
     wandb.config['ddp_world_size'] = ddp_world_size
-    logger.info(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
+    print(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
 train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
 val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val')
 
 ### CREATE MODEL
-if master_process: logger.info("### Build Model...")
+if master_process: print("### Build Model...")
 model = GPT(
     GPTConfig(
         block_size = config.block_size,
@@ -160,7 +160,7 @@ def get_most_likely_row(tokens, mask, logits):
     return pred_norm
 
 ### TRAIN LOOP
-if master_process: logger.info("### Start trainning...")
+if master_process: print("### Start trainning...")
 dt_hist = []
 # for step in range(config.max_steps):
 for step in range(7000):
@@ -169,7 +169,7 @@ for step in range(7000):
     
     ### VALIDATION
     if (step % config.val_every_n_steps == 0) or final_step:
-        if master_process: logger.info('### Validation')
+        if master_process: print('### Validation')
         model.eval()
         val_loader.reset()
         with torch.no_grad():
@@ -187,12 +187,12 @@ for step in range(7000):
             
         if ddp: dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
         if master_process:
-            logger.info(f"Validation loss: {val_loss_accum:04f}")
+            print(f"Validation loss: {val_loss_accum:04f}")
             wandb.log({"step": step, "val_loss": val_loss_accum})
     
     ### EVAL ON HELLASWAG
     if (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
-        if master_process: logger.info('### Hellaswag evaluation')
+        if master_process: print('### Hellaswag evaluation')
         num_correct_norm = 0
         num_total = 0
         for i, example in tqdm(enumerate(iterate_examples("val")), total=10_042):
@@ -270,7 +270,7 @@ for step in range(7000):
         tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
         tokens_per_sec = tokens_processed / dt
         dtms = dt*1000
-        logger.info(f"Step {step}: loss: {loss_accum:.6f} | lr: {lr:4e} | norm: {norm:.4f} | dt: {dtms:.2f}ms | tok/s: {tokens_per_sec:.02f} | remain: {eta:.2f} h")
+        print(f"Step {step}: loss: {loss_accum:.6f} | lr: {lr:4e} | norm: {norm:.4f} | dt: {dtms:.2f}ms | tok/s: {tokens_per_sec:.02f} | remain: {eta:.2f} h")
         wandb.log({
         "step": step,
         "train_loss": loss_accum,
@@ -280,7 +280,7 @@ for step in range(7000):
         "toks/s": tokens_per_sec
         })
         if master_process and (step % 5000 == 0) and step > 0:
-            logger.info("### Save checkpoint to WandB")
+            print("### Save checkpoint to WandB")
             model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
             model_path = f'gpt-model-step-{step}.pth'
             torch.save(raw_model.state_dict(), model_path)
@@ -288,7 +288,7 @@ for step in range(7000):
             wandb.log_artifact(model_artifact)
 
 if master_process:
-    logger.info("### Save last checkpoint top WandB")
+    print("### Save last checkpoint top WandB")
     model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
     model_path = f'gpt-model-step-{step}.pth'
     torch.save(raw_model.state_dict(), model_path)
