@@ -33,7 +33,8 @@ class CasualSelfAttention(nn.Module):
         self.c_proj.GPT_SCALE_INIT = 1.
         
         if self.use_rope:
-            self.rope = RotaryPositionalEmbeddings(dim=self.head_dim, max_seq_len=config.block_size)
+            print('Using RotaryPositionalEmbeddings')
+            self.rope = RotaryPositionalEmbeddings(dim=(self.n_embd // config.n_head), max_seq_len=config.block_size)
         
         if not self.use_flash_attn:
             # Create attention lower-triangular mask to keep only attn score with previous tokens

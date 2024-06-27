@@ -14,8 +14,6 @@ import logging
 import wandb
 from tqdm import tqdm
 from hellaswag import render_example, iterate_examples
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 assert os.getenv('BS') is not None
 
@@ -33,7 +31,7 @@ config = Gpt2TrainConfig(
     n_head = 12, #12
     n_embd = 768, #768
     use_flash_attn = True, #True
-    use_rope = False,
+    use_rope = True,
     
     # LR Scheduler params
     max_lr = 6e-4 * 3, #6e-4
