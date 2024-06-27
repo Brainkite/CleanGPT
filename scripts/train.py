@@ -40,7 +40,7 @@ config = Gpt2TrainConfig(
     min_lr_ratio = 0.1, #0.1
     warmup_steps = 715, #GPT2:715 (100)
     max_steps = 19_073, #19_073
-    val_every_n_steps = 50, #100
+    val_every_n_steps = 250, #100
     val_n_steps = 20, #20
     
     # Optimizer
@@ -162,8 +162,7 @@ def get_most_likely_row(tokens, mask, logits):
 ### TRAIN LOOP
 if master_process: print("### Start trainning...")
 dt_hist = []
-# for step in range(config.max_steps):
-for step in range(7000):
+for step in range(config.max_steps):
     final_step = step == config.max_steps-1
     if master_process: t0 = time.time()
     
@@ -279,7 +278,7 @@ for step in range(7000):
         "dt_ms": dtms,
         "toks/s": tokens_per_sec
         })
-        if master_process and (step % 5000 == 0) and step > 0:
+        if master_process and (step % 5000 == 0) and (step > config.max_steps//2):
             print("### Save checkpoint to WandB")
             model_artifact = wandb.Artifact(f'gpt-model-step-{step}', type='model')
             model_path = f'gpt-model-step-{step}.pth'
