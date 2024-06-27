@@ -168,7 +168,7 @@ for step in range(7000):
     if master_process: t0 = time.time()
     
     ### VALIDATION
-    if (step % config.val_every_n_steps == 0) or final_step:
+    if step>0 and (step % config.val_every_n_steps == 0) or final_step:
         if master_process: print('### Validation')
         model.eval()
         val_loader.reset()
@@ -191,7 +191,7 @@ for step in range(7000):
             wandb.log({"step": step, "val_loss": val_loss_accum})
     
     ### EVAL ON HELLASWAG
-    if (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
+    if step>0 and (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
         if master_process: print('### Hellaswag evaluation')
         num_correct_norm = 0
         num_total = 0
