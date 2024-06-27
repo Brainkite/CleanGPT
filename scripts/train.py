@@ -36,7 +36,7 @@ config = Gpt2TrainConfig(
     use_rope = False,
     
     # LR Scheduler params
-    max_lr = 6e-4, #6e-4
+    max_lr = 6e-4 * 3, #6e-4
     min_lr_ratio = 0.1, #0.1
     warmup_steps = 100, #GPT2:715 (100)
     max_steps = 19_073, #19_073
