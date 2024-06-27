@@ -33,6 +33,7 @@ config = Gpt2TrainConfig(
     n_head = 12, #12
     n_embd = 768, #768
     use_flash_attn = True, #True
+    use_rope = False,
     
     # LR Scheduler params
     max_lr = 6e-4, #6e-4
@@ -127,7 +128,8 @@ model = GPT(
         n_layer = config.n_layer ,
         n_head = config.n_head,
         n_embd = config.n_embd,
-        use_flash_attn = config.use_flash_attn, 
+        use_flash_attn = config.use_flash_attn,
+        use_rope= config.use_rope
         )
     )
 model.to(device)
