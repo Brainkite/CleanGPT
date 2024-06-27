@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 def load_tokens(filename):
-    toks = torch.tensor(np.load(filename).astype(np.int32), dtype=torch.long)
+    toks = torch.tensor(np.load(filename), dtype=torch.long)
     return toks
 
 class DistributedDataloader:
