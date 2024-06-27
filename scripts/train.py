@@ -38,7 +38,7 @@ config = Gpt2TrainConfig(
     # LR Scheduler params
     max_lr = 6e-4, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 715, #GPT2:715 (100)
+    warmup_steps = 100, #GPT2:715 (100)
     max_steps = 19_073, #19_073
     val_every_n_steps = 250, #100
     val_n_steps = 20, #20
@@ -162,7 +162,7 @@ def get_most_likely_row(tokens, mask, logits):
 ### TRAIN LOOP
 if master_process: print("### Start trainning...")
 dt_hist = []
-for step in range(config.max_steps):
+for step in range(config.max_steps//3):
     final_step = step == config.max_steps-1
     if master_process: t0 = time.time()
     
