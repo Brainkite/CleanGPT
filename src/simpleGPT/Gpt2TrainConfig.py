@@ -6,6 +6,7 @@ class Gpt2TrainConfig:
     data_dir: str
     total_batch_size: int
     bs: int
+    shuffle_seq: bool
     
     # Model params
     block_size: int

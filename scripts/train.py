@@ -23,6 +23,7 @@ config = Gpt2TrainConfig(
     data_dir = "/workspace/datasets/edu_fineweb10B",
     total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
     bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
+    shuffle_seq= True,
     
     # Model params
     block_size = 1024, #1024
@@ -114,8 +115,8 @@ if master_process:
     wandb.config['grad_accum_steps'] = grad_accum_steps
     wandb.config['ddp_world_size'] = ddp_world_size
     print(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
-train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train')
-val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val')
+train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', shuffle=config.shuffle_seq)
+val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', shuffle=False)
 
 ### CREATE MODEL
 if master_process: print("### Build Model...")
