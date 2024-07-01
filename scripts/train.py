@@ -84,10 +84,6 @@ if master_process:
     )
     print("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in asdict(config).items()])
 
-### SEED
-torch.manual_seed(config.seed)
-if torch.cuda.is_available(): torch.cuda.manual_seed(config.seed)
-
 ### MATMUL PRECISION
 matmul_prec_dict = {0:'medium', 1:'high', 2:'highest'}
 torch.set_float32_matmul_precision(matmul_prec_dict[config.matmul_precision])
@@ -106,6 +102,11 @@ def get_lr(it, max_lr, min_lr, warmup_steps, max_steps):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return min_lr + coeff * (max_lr - min_lr)
 
+### SEED
+np.random.seed(config.seed)
+torch.manual_seed(config.seed)
+if torch.cuda.is_available(): torch.cuda.manual_seed(config.seed)
+
 ### DATALOADER
 total_batch_size = config.total_batch_size
 B,T = config.bs, config.block_size
@@ -117,6 +118,11 @@ if master_process:
     print(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
 train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', shuffle=config.shuffle_seq)
 val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', shuffle=False)
+
+### SEED
+np.random.seed(config.seed)
+torch.manual_seed(config.seed)
+if torch.cuda.is_available(): torch.cuda.manual_seed(config.seed)
 
 ### CREATE MODEL
 if master_process: print("### Build Model...")
