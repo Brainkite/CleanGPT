@@ -32,7 +32,7 @@ config = Gpt2TrainConfig(
     n_head = 12, #12
     n_embd = 768, #768
     use_flash_attn = True, #True
-    use_rope = True,
+    use_rope = False,
     
     # LR Scheduler params
     max_lr = 6e-4 * 3, #6e-4
