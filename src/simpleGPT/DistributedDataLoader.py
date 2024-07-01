@@ -30,12 +30,15 @@ class DistributedDataloader:
             shuffled_idxs = torch.randperm(len(fns))
             fns = [fns[i] for i in shuffled_idxs]
         
-        # Split dataset by processes
-        split_size = len(fns)//self.num_processes
-        split_start = split_size * self.process_rank
-        split_end = split_start + split_size
-        split = fns[split_start : split_end]
-        self.shards = split
+        if self.split == 'train':
+            # Split dataset by processes
+            split_size = len(fns)//self.num_processes
+            split_start = split_size * self.process_rank
+            split_end = split_start + split_size
+            split = fns[split_start : split_end]
+            self.shards = split
+        else:
+            self.shards = fns
 
         print(f"Found {len(self.shards)} shards for {self.split} split in process {self.process_rank}")
         
