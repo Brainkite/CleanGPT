@@ -18,7 +18,11 @@ class DistributedDataloader:
         assert split in {'train', 'val'}
         
         self.load_dataset()
+        self.reset()
+        
+    def reset(self):
         self.curr_position = 0
+        
         
     def load_dataset(self):
         fns = os.listdir(self.data_dir)

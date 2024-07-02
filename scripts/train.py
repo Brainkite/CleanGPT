@@ -39,7 +39,7 @@ config = Gpt2TrainConfig(
     min_lr_ratio = 0.1, #0.1
     warmup_steps = 100, #GPT2:715 (100)
     max_steps = 19_073, #19_073
-    val_every_n_steps = 250, #100
+    val_every_n_steps = 250, #250
     val_n_steps = 20, #20
     
     # Optimizer
