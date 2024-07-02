@@ -36,11 +36,7 @@ class DistributedDataloader:
         
         if self.split == 'train':
             # Split dataset by processes
-            split_size = len(fns)//self.num_processes
-            split_start = split_size * self.process_rank
-            split_end = split_start + split_size
-            split = fns[split_start : split_end]
-            self.shards = split
+            self.shards = list(np.array_split(fns, self.num_processes)[self.process_rank])
         else:
             self.shards = fns
 
