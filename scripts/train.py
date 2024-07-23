@@ -9,7 +9,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from simpleGPT.Gpt2TrainConfig import Gpt2TrainConfig
 from simpleGPT.simplegpt import GPT, GPTConfig
-from simpleGPT.DistributedDataLoader import DistributedDataloader
+from simpleGPT.JestDistributedDataLoader import JestDistributedDataloader
 import logging
 import wandb
 from tqdm import tqdm
@@ -115,8 +115,8 @@ if master_process:
     wandb.config['grad_accum_steps'] = grad_accum_steps
     wandb.config['ddp_world_size'] = ddp_world_size
     print(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
-train_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', shuffle=config.shuffle_seq)
-val_loader = DistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', shuffle=False)
+train_loader = JestDistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', shuffle=config.shuffle_seq)
+val_loader = JestDistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', shuffle=False)
 
 ### CREATE MODEL
 if master_process: print("### Build Model...")

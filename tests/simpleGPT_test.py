@@ -1,7 +1,7 @@
 import pytest
 import torch
-from src.simpleGPT.simplegpt import GPTConfig
-from src.simpleGPT.simplegpt import CasualSelfAttention, MLP, Block, GPT
+from simpleGPT.simplegpt import GPTConfig
+from simpleGPT.simplegpt import CasualSelfAttention, MLP, Block, GPT
 
 class TestCasualSelfAttention:
     
