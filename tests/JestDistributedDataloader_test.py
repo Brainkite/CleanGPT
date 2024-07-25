@@ -14,33 +14,32 @@ def sample_data_dir(tmp_path):
     return str(data_dir)
 
 @pytest.fixture
-def sample_ref_scores_dir(tmp_path):
-    ref_scores_dir = tmp_path / "ref_scores"
-    ref_scores_dir.mkdir()
-    return str(ref_scores_dir)
+def sample_ref_scores_fp(tmp_path):
+    ref_scores_fp = tmp_path/"ref_scores.npy"
+    return str(ref_scores_fp)
 
-def test_init_not_jest(sample_data_dir, sample_ref_scores_dir):
-    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=False, ref_scores_dir=sample_ref_scores_dir)
+def test_init_not_jest(sample_data_dir, sample_ref_scores_fp):
+    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=False, ref_scores_fp=sample_ref_scores_fp)
     assert loader.B == 32
     assert loader.T == 128
     assert loader.jest == False
-    assert loader.ref_scores_dir == sample_ref_scores_dir
+    assert loader.ref_scores_fp == sample_ref_scores_fp
 
-def test_init_with_jest(sample_data_dir, sample_ref_scores_dir):
-    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_dir=sample_ref_scores_dir)
+def test_init_with_jest(sample_data_dir, sample_ref_scores_fp):
+    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_fp=sample_ref_scores_fp)
     assert loader.B == 32
     assert loader.T == 128
     assert loader.jest == True
-    assert loader.ref_scores_dir == sample_ref_scores_dir
+    assert loader.ref_scores_fp == sample_ref_scores_fp
 
 def test_load_dataset(sample_data_dir):
     loader = JestDistributedDataloader(sample_data_dir, 32, 128)
     assert len(loader.shards) == 3
-    assert loader.tokens.shape[0] == 24
-    assert loader.tokens.shape[1] == 129  # T + 1
+    assert loader.samples.shape[0] == 24
+    assert loader.samples.shape[1] == 129  # T + 1
 
-def test_loading_ref_scores(sample_data_dir, sample_ref_scores_dir):
-    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_dir=sample_ref_scores_dir)
+def test_loading_ref_scores(sample_data_dir, sample_ref_scores_fp):
+    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_fp=sample_ref_scores_fp)
     assert loader.ref_scores.shape[0] == loader.total_samples
     assert 'shard_idx' in loader.ref_scores.dtype.names
     assert 'sample_idx' in loader.ref_scores.dtype.names
@@ -48,17 +47,19 @@ def test_loading_ref_scores(sample_data_dir, sample_ref_scores_dir):
 
 def test_shuffle_samples(sample_data_dir):
     loader = JestDistributedDataloader(sample_data_dir, 32, 128, shuffle=False)
-    original_tokens = loader.tokens.clone()
+    original_tokens = loader.samples.clone()
     loader.shuffle_samples()
-    assert not torch.all(loader.tokens == original_tokens)
+    assert not torch.all(loader.samples == original_tokens)
 
-def test_save_ref_scores(sample_data_dir, sample_ref_scores_dir):
-    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_dir=sample_ref_scores_dir)
+def test_save_ref_scores(sample_data_dir, sample_ref_scores_fp):
+    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_fp=sample_ref_scores_fp)
     loader.save_ref_scores()
-    assert len(os.listdir(sample_ref_scores_dir)) == len(loader.shards)
+    
+    output = np.load(sample_ref_scores_fp)
+    assert np.array_equal(output, loader.ref_scores)
 
-def test_update_ref_scores(sample_data_dir, sample_ref_scores_dir):
-    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_dir=sample_ref_scores_dir, shuffle=False)
+def test_update_ref_scores(sample_data_dir, sample_ref_scores_fp):
+    loader = JestDistributedDataloader(sample_data_dir, 4, 128, jest=True, ref_scores_fp=sample_ref_scores_fp, shuffle=False)
     new_scores = np.ones(4, dtype=loader.ref_scores.dtype)
     new_scores['shard_idx'] = 0
     new_scores['sample_idx'] = np.arange(4)
@@ -73,8 +74,8 @@ def test_new_batch_normal(sample_data_dir):
     assert y.shape == (32, 128)
     assert ref_sc is None  # because jest is False
 
-def test_new_batch_jest(sample_data_dir, sample_ref_scores_dir):
-    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_dir=sample_ref_scores_dir)
+def test_new_batch_jest(sample_data_dir, sample_ref_scores_fp):
+    loader = JestDistributedDataloader(sample_data_dir, 32, 128, jest=True, ref_scores_fp=sample_ref_scores_fp)
     x, y, ref_sc = loader.new_batch()
     assert x.shape == (32, 128)
     assert y.shape == (32, 128)
@@ -83,7 +84,7 @@ def test_new_batch_jest(sample_data_dir, sample_ref_scores_dir):
 def test_new_batch_wrap_around(sample_data_dir):
     loader = JestDistributedDataloader(sample_data_dir, 32, 128)
     # Move to the end of the dataset
-    loader.curr_position = loader.tokens.shape[0] - 16
+    loader.curr_position = loader.samples.shape[0] - 16
     x, y, ref_sc = loader.new_batch()
     assert x.shape == (32, 128)
     assert y.shape == (32, 128)
@@ -117,14 +118,14 @@ def test_load_ref_scores():
     # Clean up
     os.remove('temp_scores.npy')
 
-def test_compute_and_cache_ref_scores(sample_data_dir, sample_ref_scores_dir):
+def test_compute_and_cache_ref_scores(sample_data_dir, sample_ref_scores_fp):
     loader = JestDistributedDataloader(
-        sample_data_dir, 2, 128, 
-        jest=True, ref_scores_dir=sample_ref_scores_dir, 
+        sample_data_dir, 4, 128, 
+        jest=True, ref_scores_fp=sample_ref_scores_fp, 
         shuffle=False)
     original_scores = loader.ref_scores.copy()
     
-    loader.compute_and_cache_ref_scores('openai-community/gpt2', 'cpu')
+    loader.compute_and_cache_ref_scores('openai-community/gpt2', 'cpu','cpu', autocast_bf16=False, compile_model=False)
     
     assert np.all(loader.ref_scores['score'] != original_scores['score'])
     

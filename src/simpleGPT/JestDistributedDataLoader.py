@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
+import time
 
 def load_tokens(filename):
     toks = torch.tensor(np.load(filename), dtype=torch.long)
@@ -13,7 +14,7 @@ def load_ref_scores(filename):
     return scores
 
 class JestDistributedDataloader:
-    def __init__(self, data_dir, B, T, process_rank=0, num_processes=1, split='train', shuffle=False, jest=False, ref_scores_dir=None):
+    def __init__(self, data_dir, B, T, process_rank=0, num_processes=1, split='train', shuffle=False, jest=False, ref_scores_fp=None):
         self.data_dir = data_dir
         self.B = B
         self.T = T
@@ -22,7 +23,8 @@ class JestDistributedDataloader:
         self.split = split
         self.shuffle = shuffle
         self.jest=jest
-        self.ref_scores_dir = str(ref_scores_dir)
+        self.ref_scores_fp = str(ref_scores_fp)
+        
         assert split in {'train', 'val'}
         
         self.load_dataset()
@@ -36,112 +38,113 @@ class JestDistributedDataloader:
         self.curr_position = 0   
     
     def __len__(self):
-        return 1 + self.tokens.shape[0] // self.B 
+        return 1 + self.samples.shape[0] // self.B 
         
     def load_dataset(self):
         fns = os.listdir(self.data_dir)
         fns = sorted([fn for fn in fns if self.split in fn])
         fns = [os.path.join(self.data_dir, fn) for fn in fns]
+        self.shards = fns
         assert len(fns)>0
+        
+        self.shards_idxs = np.arange(len(fns))
         if self.shuffle:
             print("# Shuffling dataset before rank split")
-            shuffled_idxs = torch.randperm(len(fns))
-            fns = [fns[i] for i in shuffled_idxs]
+            np.random.shuffle(self.shards_idxs)
             
         if self.split == 'train':
             # Split dataset by processes
-            self.shards = list(np.array_split(fns, self.num_processes)[self.process_rank])
-        else:
-            self.shards = fns
+            self.shards_idxs = list(np.array_split(self.shards_idxs, self.num_processes)[self.process_rank])
 
-        print(f"# Found {len(self.shards)} shards for {self.split} split in process {self.process_rank}")
+        print(f"# Found {len(self.shards_idxs)} shards for {self.split} split in process {self.process_rank}")
         
-        print('# Loading shards in one tensor...')
-        self.total_samples = sum(load_tokens(shard).size(0) // (self.T + 1) for shard in self.shards)
-        self.tokens = torch.empty((self.total_samples, self.T + 1), dtype= torch.long)
+        self.total_samples = sum(load_tokens(self.shards[i]).size(0) // (self.T + 1) for i in self.shards_idxs)
+        print(f'# Loading {self.total_samples} samples in one tensor...')
+        self.samples = torch.empty((self.total_samples, self.T + 1), dtype= torch.long)
 
         current_index = 0
-        for shard in self.shards:
-            toks = load_tokens(shard)
+        for shard_i in self.shards_idxs:
+            toks = load_tokens(self.shards[shard_i])
             n_samples = toks.size(0) // (self.T + 1)
             toks = toks[:n_samples * (self.T + 1)].view(n_samples, self.T + 1)
-            self.tokens[current_index:current_index + n_samples, :] = toks
+            self.samples[current_index:current_index + n_samples, :] = toks
             current_index += n_samples
+            
+        # ## WARNING: to remove
+        # self.samples = self.samples[:100]
 
-        print(f"# Loaded {self.tokens.shape} samples in process {self.process_rank}")
+        print(f"# Loaded {self.samples.shape} samples in process {self.process_rank}")
         
     def load_ref_scores(self):
-        dtype = np.dtype([('shard_idx', np.uint16), ('sample_idx', np.uint16), ('score', np.float32)])
-        self.ref_scores = np.zeros(self.total_samples, dtype=dtype)
-        
-        if not os.path.exists(self.ref_scores_dir): os.makedirs(self.ref_scores_dir)
+        dtype = np.dtype([('shard_idx', np.uint16), ('sample_idx', np.uint32), ('score', np.float32)])
+        sample_idx_scores = np.zeros(self.total_samples, dtype=dtype)
 
         current_index = 0
-        for shard_i, shard in enumerate(self.shards):
-            n_samples = load_tokens(shard).size(0) // (self.T + 1)
-            
-            ref_score_pth = os.path.join(self.ref_scores_dir, os.path.basename(shard))
-            if not os.path.exists(ref_score_pth):
-                print(f'# Ref score file absent, creating one with zeros at {ref_score_pth}')
-                scores = np.zeros((n_samples,), dtype=np.float32)
-                scores = torch.tensor(scores, dtype=torch.float32)
-            else:
-                scores = load_ref_scores(ref_score_pth)
-                assert n_samples == scores.size(0), print(n_samples, "!=", scores.size(0))
-            
+        for shard_i in self.shards_idxs:
+            n_samples = load_tokens(self.shards[shard_i]).size(0) // (self.T + 1)
             end_index = current_index + n_samples
-            self.ref_scores['shard_idx'][current_index:end_index] = shard_i
-            self.ref_scores['sample_idx'][current_index:end_index] = np.arange(n_samples)
-            self.ref_scores['score'][current_index:end_index] = scores
-            
+            sample_idx_scores['shard_idx'][current_index:end_index] = shard_i
+            sample_idx_scores['sample_idx'][current_index:end_index] = np.arange(n_samples)
             current_index += n_samples
+        
+        if os.path.exists(self.ref_scores_fp):
+            self.ref_scores = np.load(self.ref_scores_fp)
+            matching_row_idxs = np.where(
+                np.in1d(
+                    self.ref_scores[['shard_idx', 'sample_idx']], 
+                    sample_idx_scores[['shard_idx', 'sample_idx']], 
+                    assume_unique=True))[0]
+            self.ref_scores = self.ref_scores[matching_row_idxs]
+        else:
+            parent_dir = os.path.dirname(self.ref_scores_fp)
+            os.makedirs(parent_dir, exist_ok=True)
+            self.ref_scores = sample_idx_scores
 
+        # ## WARNING: to remove
+        # self.ref_scores = self.ref_scores[:100]
+        
+        assert self.ref_scores.shape[0] == self.samples.shape[0], print(self.ref_scores.shape, self.samples.shape)
         
     def shuffle_samples(self):
-        shuffle_idxs = torch.randperm(self.tokens.size(0))
-        self.tokens = self.tokens[shuffle_idxs, :]
+        shuffle_idxs = torch.randperm(self.samples.size(0))
+        self.samples = self.samples[shuffle_idxs, :]
         if self.jest:
             self.ref_scores = self.ref_scores[shuffle_idxs]
-            self.shard_sample_idxs = self.shard_sample_idxs[shuffle_idxs, :]
     
     def save_ref_scores(self):
         sort_idxs = np.lexsort((self.ref_scores['sample_idx'], self.ref_scores['shard_idx']))
         sorted_ref_scores = self.ref_scores[sort_idxs]
-        
-        shard_idxs, inverse_indices = np.unique(sorted_ref_scores['shard_idx'], return_inverse=True)
-        shards_ref_scores = {os.path.basename(self.shards[shard_id]): sorted_ref_scores[inverse_indices == i] for i, shard_id in enumerate(shard_idxs)}
-        
-        for shard, ref_scores in shards_ref_scores.items():
-            fn = os.path.join(self.ref_scores_dir, shard)
-            np.save(fn, ref_scores['score'].astype(np.float32)) 
+        print(f"Writting ref scores to {self.ref_scores_fp}")
+        np.save(self.ref_scores_fp, sorted_ref_scores)
             
     def update_ref_scores(self, ref_sc):
         # Find the row indices in ref_scores that match ref_sc rows
         matching_row_idxs = np.where(
             np.in1d(
                 self.ref_scores[['shard_idx', 'sample_idx']], 
-                ref_sc[['shard_idx', 'sample_idx']], 
+                ref_sc[['shard_idx', 'sample_idx']],
                 assume_unique=True)
             )[0]
         
+        assert len(matching_row_idxs) == self.B, print(len(matching_row_idxs), matching_row_idxs, self.B)
+
         # Update the 'score' column of ref_scores at these indices
         self.ref_scores['score'][matching_row_idxs] = ref_sc['score']
 
-      
     def new_batch(self):
         B = self.B
         ref_sc = None
         
-        if self.curr_position + B <= self.tokens.size(0):
-            buf = self.tokens[self.curr_position : self.curr_position + B, :]
+        if self.curr_position + B <= self.samples.size(0):
+            buf = self.samples[self.curr_position : self.curr_position + B, :]
             if self.jest:
                 ref_sc = self.ref_scores[self.curr_position : self.curr_position + B]
             self.curr_position += B
         else:
-            remain = self.tokens.size(0) - self.curr_position
+            remain = self.samples.size(0) - self.curr_position
             buf = torch.empty((B, self.T+1), dtype=torch.long)
-            buf[:remain] = self.tokens[self.curr_position:]
-            buf[remain:] = self.tokens[:B-remain]
+            buf[:remain] = self.samples[self.curr_position:]
+            buf[remain:] = self.samples[:B-remain]
             
             if self.jest:
                 ref_sc = np.concatenate([
@@ -156,7 +159,7 @@ class JestDistributedDataloader:
 
         return x, y, ref_sc
         
-    def compute_and_cache_ref_scores(self, model_name, device):
+    def compute_and_cache_ref_scores(self, model_name, device, device_type, autocast_bf16, compile_model):
         assert model_name in {
             'EleutherAI/gpt-j-6b', 
             'openai-community/gpt2',
@@ -168,35 +171,57 @@ class JestDistributedDataloader:
             'EleutherAI/gpt-neo-2.7B'
             }
         print(f"# Loading Hugging Face model: {model_name}")
+        
+        def _forward_loss(x, y):
+            outputs = model(x, labels=y)
+            loss = outputs.loss.item()
+
+            # Compute per-sample loss
+            probs = outputs.logits.view(-1, model.config.vocab_size)
+            labs = y.flatten()
+            scores = torch.nn.functional.cross_entropy(
+                probs,
+                labs,
+                reduction='none'
+            )
+            scores = scores.view(y.size())
+            return loss, scores
+        
         model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
-
-        # We don't need to initialize the tokenizer since input is pre-tokenized
-
+        
+        # #WARNING: to comment out
+        # print("####### WARNING Reinitializing model weights randomly")
+        # def reinit_weights(m):
+        #     if isinstance(m, (torch.nn.Linear, torch.nn.Embedding, torch.nn.LayerNorm)):
+        #         m.reset_parameters()
+        # model.apply(reinit_weights)
+        
+        if compile_model:
+            print('# Compiling model')
+            model = torch.compile(model)
         model.eval()
         total_loss = 0
         total_samples = 0
+        
+        total_batches = 1 + self.samples.shape[0] // self.B
+        print(f'# Total batches to compute: {total_batches}')
 
         with torch.no_grad():
-            for i in tqdm(range(1 + self.tokens.shape[0] // self.B ), desc="Computing reference scores"):
+            
+            pbar = tqdm(total=total_batches, desc="Computing reference scores")
+            start_time = time.time()
+            
+            for i in range(total_batches):
                 x, y, ref_sc = self.new_batch()
                 x = x.to(device)
                 y = y.to(device)
 
-                # The input is already tokenized, so we can use it directly
-                outputs = model(x, labels=y)
-                loss = outputs.loss.item()
-
-                # Compute per-sample loss
-                # Note: we use the model's config.vocab_size instead of output.logits.size(-1)
-                probs = outputs.logits.view(-1, model.config.vocab_size)
-                labs = y.flatten()
-                scores = torch.nn.functional.cross_entropy(
-                    probs,
-                    labs,
-                    reduction='none'
-                )
-                scores = scores.view(y.size())
-
+                if autocast_bf16:
+                    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                        loss, scores = _forward_loss(x,y)
+                else:
+                    loss, scores = _forward_loss(x,y)
+                    
                 # Average loss per sample
                 scores = scores.mean(dim=1).cpu().numpy()
 
@@ -208,8 +233,24 @@ class JestDistributedDataloader:
 
                 total_loss += loss * len(scores)
                 total_samples += len(scores)
+                
+                # Update progress bar
+                pbar.update(1)
+                
+                # Calculate and display ETA
+                elapsed_time = time.time() - start_time
+                batches_per_second = (i + 1) / elapsed_time
+                eta_seconds = (total_batches - (i + 1)) / batches_per_second
+                eta_string = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
+                
+                pbar.set_postfix({
+                    'Batch': f'{i+1}/{total_batches}',
+                    'Avg Loss': f'{total_loss/total_samples:.4f}',
+                    'ETA': eta_string
+                })
+            pbar.close()
 
         average_loss = total_loss / total_samples
         print(f"# Finished computing and caching reference scores. Average loss: {average_loss:.4f}")
 
-        self.save_ref_scores()  
+        self.save_ref_scores()

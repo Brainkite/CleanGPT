@@ -17,7 +17,6 @@ from hellaswag import render_example, iterate_examples
 
 assert os.getenv('BS') is not None
 
-
 config = Gpt2TrainConfig(
     #Dataloader
     data_dir = "/workspace/datasets/edu_fineweb10B",
@@ -32,7 +31,7 @@ config = Gpt2TrainConfig(
     n_head = 12, #12
     n_embd = 768, #768
     use_flash_attn = True, #True
-    use_rope = True,
+    use_rope = False,
     
     # LR Scheduler params
     max_lr = 6e-4 * 3, #6e-4
@@ -47,10 +46,18 @@ config = Gpt2TrainConfig(
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = True, #TRUE
+    autocast_bf16 = False, #TRUE
     compile_model = False, #False
     use_grad_clip = True, #TRUE
     seed = 1337, #1337
+    
+    #JEST
+    ref_model_name = 'openai-community/gpt2',
+    online_jest = False,
+    filtering_ratio = 0.8,
+    n_chunks = 16,
+    ref_scores_fp='/workspaces/simpleGPT/datasets/edu_fineweb10B_ref_scores_gpt2-medium_T1024.npy'
+)
 )
 
 # SETUP DDP

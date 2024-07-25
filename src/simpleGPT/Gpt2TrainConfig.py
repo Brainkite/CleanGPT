@@ -34,3 +34,11 @@ class Gpt2TrainConfig:
     compile_model: bool
     use_grad_clip: bool
     seed: int
+    
+    #JEST
+    ref_model_name: str
+    online_jest: bool
+    filtering_ratio: float
+    n_chunks: int
+    ref_scores_fp: str
+    
