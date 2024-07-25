@@ -123,7 +123,7 @@ if master_process and ddp:
     print("Merging reference scores from all ranks...")
     
     # Get the base filename without rank information
-    base_filename = config.ref_scores_fp[:-9] + '.npy'  # Remove '_rankX.npy'
+    base_filename = config.ref_scores_fp[:-10] + '.npy'  # Remove '_rankX.npy'
     
     all_scores = []
     for rank in range(ddp_world_size):
