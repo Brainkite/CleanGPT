@@ -116,11 +116,8 @@ if master_process:
     print("Finished computing and caching reference scores.")
 
 if ddp:
-    destroy_process_group()
-    
-if ddp:
-    # Wait for all processes to finish
     barrier()
+    destroy_process_group()
 
 if master_process and ddp:
     print("Merging reference scores from all ranks...")
