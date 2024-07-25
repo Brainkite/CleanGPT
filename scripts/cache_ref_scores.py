@@ -19,7 +19,7 @@ assert os.getenv('BS') is not None
 
 config = Gpt2TrainConfig(
     #Dataloader
-    data_dir = "/workspaces/simpleGPT/datasets/edu_fineweb10B",
+    data_dir = "/workspace/datasets/edu_fineweb10B",
     total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
     bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
     shuffle_seq= False,
@@ -46,7 +46,7 @@ config = Gpt2TrainConfig(
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = False, #TRUE
+    autocast_bf16 = True, #TRUE
     compile_model = True, #False
     use_grad_clip = True, #TRUE
     seed = 1337, #1337
@@ -56,7 +56,7 @@ config = Gpt2TrainConfig(
     online_jest = False,
     filtering_ratio = 0.8,
     n_chunks = 16,
-    ref_scores_fp='/workspaces/simpleGPT/datasets/scores/edu_fineweb10B_ref_scores_gpt2_T1024.npy'
+    ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T1024.npy'
 )
 
 # SETUP DDP

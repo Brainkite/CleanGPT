@@ -70,8 +70,8 @@ class JestDistributedDataloader:
             self.samples[current_index:current_index + n_samples, :] = toks
             current_index += n_samples
             
-        # ## WARNING: to remove
-        # self.samples = self.samples[:100]
+        ## WARNING: to remove
+        self.samples = self.samples[:100]
 
         print(f"# Loaded {self.samples.shape} samples in process {self.process_rank}")
         
@@ -100,8 +100,8 @@ class JestDistributedDataloader:
             os.makedirs(parent_dir, exist_ok=True)
             self.ref_scores = sample_idx_scores
 
-        # ## WARNING: to remove
-        # self.ref_scores = self.ref_scores[:100]
+        ## WARNING: to remove
+        self.ref_scores = self.ref_scores[:100]
         
         assert self.ref_scores.shape[0] == self.samples.shape[0], print(self.ref_scores.shape, self.samples.shape)
         
