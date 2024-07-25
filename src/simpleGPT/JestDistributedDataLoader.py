@@ -226,14 +226,9 @@ class JestDistributedDataloader:
                 if self.process_rank == 0:
                     elapsed_time = time.time() - start_time
                     tokens_per_second = self.num_processes * total_tokens_processed / elapsed_time
-                    batches_per_second = (i + 1) / elapsed_time
-                    eta_seconds = (total_batches - (i + 1)) / batches_per_second
-                    eta_string = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
                     pbar.set_postfix({
-                        'Batch': f'{i+1}/{total_batches}',
                         'Avg Loss': f'{total_loss/total_samples:.4f}',
                         'Tokens/sec': f'{tokens_per_second:.2f}',
-                        'ETA': eta_string
                     })
                     pbar.update(1)
 
