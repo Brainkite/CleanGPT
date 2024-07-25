@@ -212,6 +212,7 @@ class JestDistributedDataloader:
                     new_ref_scores[start:] = ref_sc[:remain]
                 else:
                     new_ref_scores[start: end] = ref_sc
+                curr_position += self.B
 
                 total_loss += loss * len(scores)
                 total_samples = i * self.B
