@@ -69,9 +69,6 @@ class JestDistributedDataloader:
             toks = toks[:n_samples * (self.T + 1)].view(n_samples, self.T + 1)
             self.samples[current_index:current_index + n_samples, :] = toks
             current_index += n_samples
-            
-        ## WARNING: to remove
-        self.samples = self.samples[:100]
 
         print(f"# Loaded {self.samples.shape} samples in process {self.process_rank}")
         
@@ -99,9 +96,6 @@ class JestDistributedDataloader:
             parent_dir = os.path.dirname(self.ref_scores_fp)
             os.makedirs(parent_dir, exist_ok=True)
             self.ref_scores = sample_idx_scores
-
-        ## WARNING: to remove
-        self.ref_scores = self.ref_scores[:100]
         
         assert self.ref_scores.shape[0] == self.samples.shape[0], print(self.ref_scores.shape, self.samples.shape)
         
@@ -188,13 +182,6 @@ class JestDistributedDataloader:
             return loss, scores
         
         model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
-        
-        # #WARNING: to comment out
-        # print("####### WARNING Reinitializing model weights randomly")
-        # def reinit_weights(m):
-        #     if isinstance(m, (torch.nn.Linear, torch.nn.Embedding, torch.nn.LayerNorm)):
-        #         m.reset_parameters()
-        # model.apply(reinit_weights)
         
         if compile_model:
             print('# Compiling model')
