@@ -215,7 +215,7 @@ class JestDistributedDataloader:
                 curr_position += self.B
 
                 total_loss += loss * len(scores)
-                total_samples = i * self.B
+                total_samples = (i+1) * self.B
                 total_tokens_processed = total_samples * self.T
 
                 if self.process_rank == 0:
