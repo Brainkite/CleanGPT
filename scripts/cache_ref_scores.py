@@ -52,11 +52,11 @@ config = Gpt2TrainConfig(
     seed = 1337, #1337
     
     #JEST
-    ref_model_name = 'openai-community/gpt2-large',
+    ref_model_name = 'openai-community/gpt2-medium',
     online_jest = False,
     filtering_ratio = 0.8,
     n_chunks = 16,
-    ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2-large_T1024.npy'
+    ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2-medium_T1024.npy'
 )
 
 # SETUP DDP
