@@ -131,7 +131,7 @@ if master_process and ddp:
         if os.path.exists(rank_filename):
             rank_scores = np.load(rank_filename)
             all_scores.append(rank_scores)
-            # os.remove(rank_filename)  # Remove the rank-specific file
+            os.remove(rank_filename)  # Remove the rank-specific file
         else:
             print(f"Warning: File for rank {rank} not found: {rank_filename}")
     
