@@ -70,6 +70,8 @@ class JestDistributedDataloader:
             self.samples[current_index:current_index + n_samples, :] = toks
             current_index += n_samples
 
+        # self.samples = self.samples[:100]
+        
         print(f"# Loaded {self.samples.shape} samples in process {self.process_rank}")
         
     def load_ref_scores(self):
@@ -96,6 +98,8 @@ class JestDistributedDataloader:
             parent_dir = os.path.dirname(self.ref_scores_fp)
             os.makedirs(parent_dir, exist_ok=True)
             self.ref_scores = sample_idx_scores
+            
+        # self.ref_scores = self.ref_scores[:100]
         
         assert self.ref_scores.shape[0] == self.samples.shape[0], print(self.ref_scores.shape, self.samples.shape)
         
@@ -165,6 +169,7 @@ class JestDistributedDataloader:
                 reduction='none'
             )
             scores = scores.view(y.size())
+            scores = scores.mean(dim=1)
             return loss, scores
         
         model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
@@ -201,7 +206,7 @@ class JestDistributedDataloader:
                     loss, scores = _forward_loss(x,y)
                     
                 # Average loss per sample
-                scores = scores.mean(dim=1).cpu().numpy()
+                scores = scores.cpu().numpy()
                 ref_sc['score'] = scores
                 
                 start = curr_position
@@ -220,7 +225,7 @@ class JestDistributedDataloader:
 
                 if self.process_rank == 0:
                     elapsed_time = time.time() - start_time
-                    tokens_per_second = total_tokens_processed / elapsed_time
+                    tokens_per_second = self.num_processes * total_tokens_processed / elapsed_time
                     batches_per_second = (i + 1) / elapsed_time
                     eta_seconds = (total_batches - (i + 1)) / batches_per_second
                     eta_string = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
