@@ -46,7 +46,7 @@ config = Gpt2TrainConfig(
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = False, #TRUE
+    autocast_bf16 = True, #TRUE
     compile_model = True, #False
     use_grad_clip = True, #TRUE
     seed = 1337, #1337
