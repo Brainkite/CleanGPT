@@ -110,20 +110,6 @@ class JestDistributedDataloader:
         sorted_ref_scores = self.ref_scores[sort_idxs]
         print(f"Writting ref scores to {self.ref_scores_fp}")
         np.save(self.ref_scores_fp, sorted_ref_scores)
-            
-    def update_ref_scores(self, ref_sc):
-        # Find the row indices in ref_scores that match ref_sc rows
-        matching_row_idxs = np.where(
-            np.in1d(
-                self.ref_scores[['shard_idx', 'sample_idx']], 
-                ref_sc[['shard_idx', 'sample_idx']],
-                assume_unique=True)
-            )[0]
-        
-        assert len(matching_row_idxs) == self.B, print(len(matching_row_idxs), matching_row_idxs, self.B)
-
-        # Update the 'score' column of ref_scores at these indices
-        self.ref_scores['score'][matching_row_idxs] = ref_sc['score']
 
     def new_batch(self):
         B = self.B
@@ -187,17 +173,22 @@ class JestDistributedDataloader:
             print('# Compiling model')
             model = torch.compile(model)
         model.eval()
-        total_loss = 0
-        total_samples = 0
-        
+        total_loss = 0        
         total_batches = 1 + self.samples.shape[0] // self.B
-        print(f'# Total batches to compute: {total_batches}')
+        if self.process_rank == 0:
+            print(f'# Total batches to compute: {total_batches}')
+            
+        dtype = np.dtype([('shard_idx', np.uint16), ('sample_idx', np.uint32), ('score', np.float32)])
+        new_ref_scores = np.zeros((self.samples.shape[0],), dtype=dtype)
+        total_tokens_processed = 0
 
         with torch.no_grad():
             
-            pbar = tqdm(total=total_batches, desc="Computing reference scores")
-            start_time = time.time()
+            if self.process_rank == 0:
+                pbar = tqdm(total=total_batches, desc="Computing reference scores")
+                start_time = time.time()
             
+            curr_position = 0
             for i in range(total_batches):
                 x, y, ref_sc = self.new_batch()
                 x = x.to(device)
@@ -211,33 +202,39 @@ class JestDistributedDataloader:
                     
                 # Average loss per sample
                 scores = scores.mean(dim=1).cpu().numpy()
-
-                # Update ref_sc with new scores
                 ref_sc['score'] = scores
-
-                # Update the reference scores in the main array
-                self.update_ref_scores(ref_sc)
+                
+                start = curr_position
+                end = curr_position + self.B 
+                if end > self.samples.size(0):
+                    remain = end - self.samples.size(0)
+                end = self.samples.size(0)
+                new_ref_scores[start: end] = ref_sc[:remain]
 
                 total_loss += loss * len(scores)
-                total_samples += len(scores)
-                
-                # Update progress bar
-                pbar.update(1)
-                
-                # Calculate and display ETA
-                elapsed_time = time.time() - start_time
-                batches_per_second = (i + 1) / elapsed_time
-                eta_seconds = (total_batches - (i + 1)) / batches_per_second
-                eta_string = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
-                
-                pbar.set_postfix({
-                    'Batch': f'{i+1}/{total_batches}',
-                    'Avg Loss': f'{total_loss/total_samples:.4f}',
-                    'ETA': eta_string
-                })
-            pbar.close()
+                total_samples = i * self.B
+                total_tokens_processed = total_samples * self.T
+
+                if self.process_rank == 0:
+                    elapsed_time = time.time() - start_time
+                    tokens_per_second = total_tokens_processed / elapsed_time
+                    batches_per_second = (i + 1) / elapsed_time
+                    eta_seconds = (total_batches - (i + 1)) / batches_per_second
+                    eta_string = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
+                    pbar.set_postfix({
+                        'Batch': f'{i+1}/{total_batches}',
+                        'Avg Loss': f'{total_loss/total_samples:.4f}',
+                        'Tokens/sec': f'{tokens_per_second:.2f}',
+                        'ETA': eta_string
+                    })
+                    pbar.update(1)
+
+            if self.process_rank == 0:
+                pbar.close()
 
         average_loss = total_loss / total_samples
-        print(f"# Finished computing and caching reference scores. Average loss: {average_loss:.4f}")
+        if self.process_rank == 0:
+            print(f"# Finished computing and caching reference scores. Average loss: {average_loss:.4f}")
 
+        self.ref_scores = new_ref_scores
         self.save_ref_scores()
