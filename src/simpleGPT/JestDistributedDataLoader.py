@@ -207,9 +207,11 @@ class JestDistributedDataloader:
                 start = curr_position
                 end = curr_position + self.B 
                 if end > self.samples.size(0):
-                    remain = end - self.samples.size(0)
-                end = self.samples.size(0)
-                new_ref_scores[start: end] = ref_sc[:remain]
+                    remain = self.samples.size(0) - end
+                    end = self.samples.size(0)
+                    new_ref_scores[start:] = ref_sc[:remain]
+                else:
+                    new_ref_scores[start: end] = ref_sc
 
                 total_loss += loss * len(scores)
                 total_samples = i * self.B
