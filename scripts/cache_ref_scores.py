@@ -116,39 +116,45 @@ if master_process:
     print("Finished computing and caching reference scores.")
 
 if ddp:
-    # barrier()
+    # Use all_reduce to synchronize
+    sync_tensor = torch.tensor([1.0], device=device)
+    dist.all_reduce(sync_tensor, op=dist.ReduceOp.SUM)
+    if sync_tensor.item() != dist.get_world_size():
+        raise RuntimeError("Synchronization error: not all processes reached the synchronization point.")
+
+if ddp:
     destroy_process_group()
 
-# if master_process and ddp:
-#     print("Merging reference scores from all ranks...")
+if master_process and ddp:
+    print("Merging reference scores from all ranks...")
     
-#     # Get the base filename without rank information
-#     base_filename = config.ref_scores_fp[:-10] + '.npy'  # Remove '_rankX.npy'
+    # Get the base filename without rank information
+    base_filename = config.ref_scores_fp[:-10] + '.npy'  # Remove '_rankX.npy'
     
-#     all_scores = []
-#     for rank in range(ddp_world_size):
-#         rank_filename = base_filename[:-4] + f'_rank{rank}.npy'
-#         if os.path.exists(rank_filename):
-#             rank_scores = np.load(rank_filename)
-#             all_scores.append(rank_scores)
-#             os.remove(rank_filename)  # Remove the rank-specific file
-#         else:
-#             print(f"Warning: File for rank {rank} not found: {rank_filename}")
+    all_scores = []
+    for rank in range(ddp_world_size):
+        rank_filename = base_filename[:-4] + f'_rank{rank}.npy'
+        if os.path.exists(rank_filename):
+            rank_scores = np.load(rank_filename)
+            all_scores.append(rank_scores)
+            os.remove(rank_filename)  # Remove the rank-specific file
+        else:
+            print(f"Warning: File for rank {rank} not found: {rank_filename}")
     
-#     if all_scores:
-#         combined_scores = np.concatenate(all_scores)
+    if all_scores:
+        combined_scores = np.concatenate(all_scores)
         
-#         # Sort the combined scores
-#         sort_idxs = np.lexsort((combined_scores['sample_idx'], combined_scores['shard_idx']))
-#         sorted_scores = combined_scores[sort_idxs]
+        # Sort the combined scores
+        sort_idxs = np.lexsort((combined_scores['sample_idx'], combined_scores['shard_idx']))
+        sorted_scores = combined_scores[sort_idxs]
         
-#         # Save the sorted, combined scores
-#         np.save(base_filename, sorted_scores)
-#         print(f"Combined reference scores saved to: {base_filename}")
-#     else:
-#         print("No scores were found to merge.")
+        # Save the sorted, combined scores
+        np.save(base_filename, sorted_scores)
+        print(f"Combined reference scores saved to: {base_filename}")
+    else:
+        print("No scores were found to merge.")
 
-# print("Script completed.")
+print("Script completed.")
     
     
     
