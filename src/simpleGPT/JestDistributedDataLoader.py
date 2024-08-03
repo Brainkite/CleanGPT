@@ -91,6 +91,7 @@ class JestDistributedDataloader:
             current_index += n_samples
         
         if os.path.exists(self.ref_scores_fp):
+            if self.process_rank == 0: print('### Loading existing ref scores file')
             self.ref_scores = np.load(self.ref_scores_fp)
             matching_row_idxs = np.where(
                 np.in1d(
@@ -99,6 +100,7 @@ class JestDistributedDataloader:
                     assume_unique=True))[0]
             self.ref_scores = self.ref_scores[matching_row_idxs]
         else:
+            if self.process_rank == 0: print('### Ref score file absent, initializing ref_scores at zero.')
             parent_dir = os.path.dirname(self.ref_scores_fp)
             os.makedirs(parent_dir, exist_ok=True)
             self.ref_scores = sample_idx_scores

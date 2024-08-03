@@ -18,8 +18,8 @@ from simpleGPT.trainer import hellaswag_eval_step, jest_train_step, validation_s
 config = Gpt2TrainConfig(
     #Dataloader
     data_dir = "/workspace/datasets/edu_fineweb10B",
-    total_batch_size = 16 * 1024, # 2**19 # ~ 0.5M tokens
-    # bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
+    total_batch_size = 512 * 1024, # 2**19 # ~ 0.5M tokens
+    # bs = int(os.getenv('BS')),# 64 (A100 80Gb) 16 (RTX4090)
     bs = 2,
     shuffle_seq= True,
     
@@ -36,7 +36,7 @@ config = Gpt2TrainConfig(
     max_lr = 6e-4 * 3, #6e-4
     min_lr_ratio = 0.1, #0.1
     warmup_steps = 2, #GPT2:715 (100)
-    max_steps = 1, #19_073
+    max_steps = 2, #19_073
     val_every_n_steps = 2, #100
     val_n_steps = 2, #20
     
@@ -55,7 +55,7 @@ config = Gpt2TrainConfig(
     online_jest = False,
     filtering_ratio = 0.5,
     n_chunks = 8,
-    ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T512.npyyyy'
+    ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T1024.npy'
 )
 
 # SETUP DDP
@@ -116,9 +116,15 @@ if master_process:
     wandb.config['ddp_world_size'] = ddp_world_size
     wandb.config['super_batch_size'] = super_batch_size
     wandb.config['actual_filtering_ratio'] = actual_filtering_ratio
-    print(f"\n### Total batch size: {total_batch_size//T} samples => gradient accumulation steps: {grad_accum_steps}")
-    print(f"### Super batch size: {super_batch_size//T} samples => jest steps: {jest_steps}")
+    print(f"\n### JEST Super batch size: {super_batch_size//T} samples => jest steps: {jest_steps}")
+    print(f"### Total batch size: {total_batch_size//T} samples => gradient accumulation steps: {grad_accum_steps}")
+    print(f"### n_chunks: {config.n_chunks} => samples_per_chunk: {total_batch_size//(T*config.n_chunks)}")
     print(f"### Actual filtering ratio: {actual_filtering_ratio:.4f}")
+    
+    print(f"\n### For each rank:")
+    print(f"### JEST samples: {super_batch_size//(T*ddp_world_size)}")
+    print(f"### num selected samples: {total_batch_size//(T*ddp_world_size)}")
+    print(f"### in {config.n_chunks//ddp_world_size} chunks")
 
 train_loader = JestDistributedDataloader(
     config.data_dir, 
@@ -157,6 +163,8 @@ def _jest_forward(x,y,model):
 def joint_examples_selection(learn_scores, n_examples, n_chunks):
     assert n_examples % n_chunks == 0
     chunk_size = n_examples // n_chunks
+    if master_process:
+        print(f"### Chunk size: {chunk_size}")
     selected_indices = []
     available_indices = np.arange(len(learn_scores))
     
@@ -238,11 +246,19 @@ for step in range(config.max_steps):
         scores[['shard_idx', 'sample_idx']][start: end] = ref_scores[['shard_idx', 'sample_idx']]
         scores['learn_score'][start: end] = learn_score
     
-    if master_process: print(f'### {len(scores)} scores computed per rank')
+    if master_process:
+        print(f'### {len(scores)} scores computed per rank')
+        mean_learn_scores = scores['learn_score'].mean()
+        print(f"Mean learnability scores before selection: {mean_learn_scores} on rank {ddp_rank}")
+        wandb.log({"step": step, "Superbatch_mean_learn_score": mean_learn_scores})
     
     selected_idxs = joint_examples_selection(scores['learn_score'], total_batch_size//(T * ddp_world_size), config.n_chunks//ddp_world_size)
     examples_idxs = scores[['shard_idx','sample_idx']][selected_idxs]
-    if master_process: print(f'### Slected {len(examples_idxs)} examples in {config.n_chunks // ddp_world_size} chunks per each rank')
+    mean_learn_scores = scores['learn_score'][selected_idxs].mean()
+    if master_process:
+        print(f'### Selected {len(examples_idxs)} examples in {config.n_chunks // ddp_world_size} chunks per each rank')
+        print(f'### Average learnability score is {mean_learn_scores} on rank {ddp_rank}')
+        wandb.log({"step": step, "Selection_mean_learn_score": mean_learn_scores})
     
     subset_dataloader = train_loader.new_dataloader_from_idxs(examples_idxs)
 
