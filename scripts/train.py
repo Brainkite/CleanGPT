@@ -54,7 +54,7 @@ config = Gpt2TrainConfig(
     ref_model_name = 'openai-community/gpt2',
     online_jest = False,
     filtering_ratio = 0.5,
-    n_chunks = 4,
+    n_chunks = 8,
     ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T512.npyyyy'
 )
 
@@ -87,7 +87,8 @@ if master_process:
         project="SimpleGPT2_compare_impl",
         config = asdict(config)
     )
-    print("### Configuration Parameters: %s", [f"\n{k}: {v}" for k,v in asdict(config).items()])
+    print("\n### Configuration Parameters:")
+    [print(f"{k}: {v}") for k,v in asdict(config).items()]
 
 ### SEED
 torch.manual_seed(config.seed)
@@ -105,6 +106,7 @@ super_batch_size = int(config.total_batch_size / (1 - config.filtering_ratio))
 super_batch_size = (super_batch_size // (B * T * ddp_world_size)) * (B * T * ddp_world_size)
 actual_filtering_ratio = 1 - (config.total_batch_size / super_batch_size)
 jest_steps = super_batch_size // (B * T * ddp_world_size)
+assert config.n_chunks % ddp_world_size == 0, print(config.n_chunks, ddp_world_size)
 
 assert total_batch_size % (B * T * ddp_world_size) == 0, total_batch_size / (B * T * ddp_world_size)
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
@@ -236,18 +238,11 @@ for step in range(config.max_steps):
         scores[['shard_idx', 'sample_idx']][start: end] = ref_scores[['shard_idx', 'sample_idx']]
         scores['learn_score'][start: end] = learn_score
     
-    torch.cuda.synchronize()
-    if ddp:
-        gathered_scores = [np.empty(0) for _ in range(ddp_world_size)]
-        dist.all_gather_object(gathered_scores, scores)
-        scores = np.concatenate(gathered_scores)
+    if master_process: print(f'### {len(scores)} scores computed per rank')
     
-    if master_process: print(f'### {len(scores)} scores gathered')
-    
-    selected_idxs = joint_examples_selection(scores['learn_score'], total_batch_size//T, config.n_chunks)
-    selected_idxs = list(np.array_split(selected_idxs , ddp_world_size)[ddp_rank])
+    selected_idxs = joint_examples_selection(scores['learn_score'], total_batch_size//(T * ddp_world_size), config.n_chunks//ddp_world_size)
     examples_idxs = scores[['shard_idx','sample_idx']][selected_idxs]
-    if master_process: print(f'### Slected {len(examples_idxs)} examples in {config.n_chunks} chunks for each rank')
+    if master_process: print(f'### Slected {len(examples_idxs)} examples in {config.n_chunks // ddp_world_size} chunks per each rank')
     
     subset_dataloader = train_loader.new_dataloader_from_idxs(examples_idxs)
 
