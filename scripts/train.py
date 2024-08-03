@@ -1,27 +1,26 @@
-import sys, os, time
+import os, time
 from dataclasses import asdict
-import math
 import torch
 import numpy as np
 from torch.nn import functional as F
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.autograd.profiler as profiler
 import torch.distributed as dist
 from simpleGPT.Gpt2TrainConfig import Gpt2TrainConfig
 from simpleGPT.simplegpt import GPT, GPTConfig
 from simpleGPT.JestDistributedDataLoader import JestDistributedDataloader
-import logging
 import wandb
-from tqdm import tqdm
-from hellaswag import render_example, iterate_examples
+from simpleGPT.trainer import hellaswag_eval_step, jest_train_step, validation_step
 
-assert os.getenv('BS') is not None
+# assert os.getenv('BS') is not None
 
 config = Gpt2TrainConfig(
     #Dataloader
-    data_dir = "/workspace/datasets/edu_fineweb10B",
-    total_batch_size = 2**19, # 2**19 # ~ 0.5M tokens
-    bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
+    data_dir = "/workspaces/simpleGPT/datasets/edu_fineweb10B",
+    total_batch_size = 8 * 1024, # 2**19 # ~ 0.5M tokens
+    # bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
+    bs = 4,
     shuffle_seq= True,
     
     # Model params
@@ -36,10 +35,10 @@ config = Gpt2TrainConfig(
     # LR Scheduler params
     max_lr = 6e-4 * 3, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 100, #GPT2:715 (100)
-    max_steps = 19_073, #19_073
-    val_every_n_steps = 250, #100
-    val_n_steps = 20, #20
+    warmup_steps = 2, #GPT2:715 (100)
+    max_steps = 4, #19_073
+    val_every_n_steps = 2, #100
+    val_n_steps = 2, #20
     
     # Optimizer
     wd = 0.1, #0.1
@@ -54,10 +53,9 @@ config = Gpt2TrainConfig(
     #JEST
     ref_model_name = 'openai-community/gpt2',
     online_jest = False,
-    filtering_ratio = 0.8,
-    n_chunks = 16,
-    ref_scores_fp='/workspaces/simpleGPT/datasets/edu_fineweb10B_ref_scores_gpt2-medium_T1024.npy'
-)
+    filtering_ratio = 0.5,
+    n_chunks = 4,
+    ref_scores_fp='/workspaces/simpleGPT/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T512.npy'
 )
 
 # SETUP DDP
@@ -89,7 +87,7 @@ if master_process:
         project="SimpleGPT2_compare_impl",
         config = asdict(config)
     )
-    print("### Configuration Parameters: %s", [f"{k}: {v} | " for k,v in asdict(config).items()])
+    print("### Configuration Parameters: %s", [f"\n{k}: {v}" for k,v in asdict(config).items()])
 
 ### SEED
 torch.manual_seed(config.seed)
@@ -99,34 +97,81 @@ if torch.cuda.is_available(): torch.cuda.manual_seed(config.seed)
 matmul_prec_dict = {0:'medium', 1:'high', 2:'highest'}
 torch.set_float32_matmul_precision(matmul_prec_dict[config.matmul_precision])
 
-### LR COSINE SCHEDULER
-min_lr = config.max_lr * config.min_lr_ratio
-def get_lr(it, max_lr, min_lr, warmup_steps, max_steps):
-    if it < warmup_steps:
-        return (it+1)/warmup_steps * max_lr
-    
-    if it > max_steps:
-        return min_lr
-    
-    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
-    assert 0 <= decay_ratio <= 1
-    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
-    return min_lr + coeff * (max_lr - min_lr)
-
 ### DATALOADER
 total_batch_size = config.total_batch_size
 B,T = config.bs, config.block_size
+
+super_batch_size = int(config.total_batch_size / (1 - config.filtering_ratio))
+super_batch_size = (super_batch_size // (B * T * ddp_world_size)) * (B * T * ddp_world_size)
+actual_filtering_ratio = 1 - (config.total_batch_size / super_batch_size)
+jest_steps = super_batch_size // (B * T * ddp_world_size)
+
 assert total_batch_size % (B * T * ddp_world_size) == 0, total_batch_size / (B * T * ddp_world_size)
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
+
 if master_process:
     wandb.config['grad_accum_steps'] = grad_accum_steps
     wandb.config['ddp_world_size'] = ddp_world_size
-    print(f"### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
-train_loader = JestDistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='train', shuffle=config.shuffle_seq)
-val_loader = JestDistributedDataloader(config.data_dir, B, T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val', shuffle=False)
+    wandb.config['super_batch_size'] = super_batch_size
+    wandb.config['actual_filtering_ratio'] = actual_filtering_ratio
+    print(f"\n### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
+    print(f"### Super batch size: {super_batch_size} => jest steps: {jest_steps}")
+    print(f"### Actual filtering ratio: {actual_filtering_ratio:.4f}")
+    print(f"### Gradient accumulation steps: {grad_accum_steps}")
+
+train_loader = JestDistributedDataloader(
+    config.data_dir, 
+    B, T, 
+    jest=True, 
+    process_rank=ddp_rank, 
+    num_processes=ddp_world_size, 
+    split='train', 
+    shuffle=config.shuffle_seq,
+    ref_scores_fp=config.ref_scores_fp
+    )
+
+val_loader = JestDistributedDataloader(
+    config.data_dir, 
+    B, 
+    T, 
+    jest=False, 
+    process_rank=ddp_rank, 
+    num_processes=ddp_world_size, 
+    split='val', 
+    shuffle=False
+    )
+
+def _jest_forward(x,y,model):
+    logits, _ = model(x, y)
+    # Compute per-sample loss
+    probs = logits.view(-1, config.vocab_size)
+    labs = y.flatten()
+    samples_loss = torch.nn.functional.cross_entropy(
+        probs,
+        labs,
+        reduction='none'
+    )
+    samples_loss = samples_loss.view(y.size()).mean(dim=1)
+    return samples_loss
+
+def joint_examples_selection(learn_scores, n_examples, n_chunks):
+    assert n_examples % n_chunks == 0
+    chunk_size = n_examples // n_chunks
+    selected_indices = []
+    available_indices = np.arange(len(learn_scores))
+    
+    for _ in range(n_chunks):
+        available_scores = learn_scores[available_indices]
+        chunk_indices = np.argpartition(available_scores, -chunk_size)[-chunk_size:]
+        chunk_indices = chunk_indices[np.argsort(available_scores[chunk_indices])[::-1]]
+        selected_indices.extend(available_indices[chunk_indices])
+        available_indices = np.delete(available_indices, chunk_indices)
+        
+    assert len(selected_indices) == n_examples
+    return selected_indices
 
 ### CREATE MODEL
-if master_process: print("### Build Model...")
+if master_process: print("\n### Build Model...")
 model = GPT(
     GPTConfig(
         block_size = config.block_size,
@@ -139,6 +184,7 @@ model = GPT(
         )
     )
 model.to(device)
+# TODO: add suupot to keep compiled and uncompiled model in memory for faster train and validation taime but stable hellaswag eval
 if config.compile_model : model = torch.compile(model)
 if ddp: model = DDP(module=model, device_ids=[ddp_local_rank])
 raw_model = model.module if ddp else model #Contains the model unwrapped 
@@ -146,50 +192,17 @@ raw_model = model.module if ddp else model #Contains the model unwrapped
 ### OPTIMIZER
 optimizer = raw_model.configure_optimizers(weight_decay=config.wd , learning_rate=config.max_lr, device_type=device_type)
 
-def get_most_likely_row(tokens, mask, logits):
-    # evaluate the autoregressive loss at all positions
-    shift_logits = (logits[..., :-1, :]).contiguous()
-    shift_tokens = (tokens[..., 1:]).contiguous()
-    flat_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
-    flat_shift_tokens = shift_tokens.view(-1)
-    shift_losses = F.cross_entropy(flat_shift_logits, flat_shift_tokens, reduction='none')
-    shift_losses = shift_losses.view(tokens.size(0), -1)
-    # now get the average loss just for the completion region (where mask == 1), in each row
-    shift_mask = (mask[..., 1:]).contiguous() # we must shift mask, so we start at the last prompt token
-    masked_shift_losses = shift_losses * shift_mask
-    # sum and divide by the number of 1s in the mask
-    sum_loss = masked_shift_losses.sum(dim=1)
-    avg_loss = sum_loss / shift_mask.sum(dim=1)
-    # now we have a loss for each of the 4 completions
-    # the one with the lowest loss should be the most likely
-    pred_norm = avg_loss.argmin().item()
-    return pred_norm
-
 ### TRAIN LOOP
-if master_process: print("### Start trainning...")
+if master_process: print("\n### Start trainning...")
 dt_hist = []
-for step in range(config.max_steps//3):
+for step in range(config.max_steps):
     final_step = step == config.max_steps-1
     if master_process: t0 = time.time()
     
     ### VALIDATION
     if step>0 and (step % config.val_every_n_steps == 0) or final_step:
-        if master_process: print('### Validation')
-        model.eval()
-        val_loader.reset()
-        with torch.no_grad():
-            val_loss_accum = .0
-            for _ in range(config.val_n_steps):
-                x, y = val_loader.new_batch()
-                x, y = x.to(device), y.to(device)
-                if config.autocast_bf16 :
-                    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(x, y)
-                else:
-                    logits, loss = model(x, y)
-                loss = loss / config.val_n_steps
-                val_loss_accum += loss.detach()
-            
+        if master_process: print('\n### Validation')
+            val_loss_accum = validation_step(config, device, device_type, val_loader, model)
         if ddp: dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
         if master_process:
             print(f"Validation loss: {val_loss_accum:04f}")
@@ -197,75 +210,53 @@ for step in range(config.max_steps//3):
     
     ### EVAL ON HELLASWAG
     if step>0 and (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
-        if master_process: print('### Hellaswag evaluation')
-        num_correct_norm = 0
-        num_total = 0
-        for i, example in tqdm(enumerate(iterate_examples("val")), total=10_042):
-            # only process examples where i % ddp_world_size == ddp_rank
-            if i % ddp_world_size != ddp_rank:
-                continue
-            # render the example into tokens and labels
-            _, tokens, mask, label = render_example(example)
-            tokens = tokens.to(device)
-            mask = mask.to(device)
-            # get the logits
-            with torch.no_grad():
-                if config.autocast_bf16 :
-                    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(tokens)
-                else:
-                    logits, loss = model(tokens)
-                pred_norm = get_most_likely_row(tokens, mask, logits)
-            num_total += 1
-            num_correct_norm += int(pred_norm == label)
-        # reduce the stats across all processes
-        if ddp:
-            num_total = torch.tensor(num_total, dtype=torch.long, device=device)
-            num_correct_norm = torch.tensor(num_correct_norm, dtype=torch.long, device=device)
-            dist.all_reduce(num_total, op=dist.ReduceOp.SUM)
-            dist.all_reduce(num_correct_norm, op=dist.ReduceOp.SUM)
-            num_total = num_total.item()
-            num_correct_norm = num_correct_norm.item()
-        acc_norm = num_correct_norm / num_total
+        if master_process: print('\n### Hellaswag evaluation')
+            num_correct_norm, num_total, acc_norm = hellaswag_eval_step(config, ddp, ddp_rank, ddp_world_size, device, device_type, model)
         if master_process:
             print(f"HellaSwag accuracy: {num_correct_norm}/{num_total}={acc_norm:.4f}")
             wandb.log({'step':step, "HS_acc":acc_norm})
 
-    ### TRAIN GRAD ACCUM LOOP
-    model.train()
-    optimizer.zero_grad()
-    loss_accum = .0
-    for accum_step in range(int(grad_accum_steps)):
-        x, y = train_loader.new_batch()
+    ## JEST Example Selection
+    if master_process: print('\n### JEST Example Selection')
+    model.eval()
+    dtype = np.dtype([('shard_idx', np.uint16), ('sample_idx', np.uint32), ('learn_score', np.float32)])
+    scores = np.zeros(super_batch_size // T, dtype=dtype)
+    for i in range(jest_steps):
+        x, y, ref_scores = train_loader.new_batch()
         x, y = x.to(device), y.to(device)
-        if ddp:
-            model.require_backward_grad_sync = (accum_step == grad_accum_steps - 1)
         if config.autocast_bf16 :
             with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                logits, loss = model(x, y)
+                samples_losses = _jest_forward(x,y,model)
         else:
-            logits, loss = model(x, y)
-        ## Scale the loss to compensate the gradient accumulation steps because the the loss is averaged
-        # only across the bini-batch but not across the full accumulated batch
-        loss = loss / grad_accum_steps
-        loss_accum += loss.detach()
-        loss.backward()
-    
-    ### GRAD CLIP
-    if config.use_grad_clip :
-        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    else:
-        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))
+            samples_losses = _jest_forward(x,y,model)
         
-    ### OPTIM STEP
-    lr = get_lr(step, config.max_lr, min_lr, config.warmup_steps , config.max_steps)
-    for param_group in optimizer.param_groups:
-        param_group['lr']  = lr
-    optimizer.step()
+        learn_score = samples_losses.detach().cpu().numpy() - ref_scores['score']
+        
+        start = i * B
+        end = start + B
+        scores[['shard_idx', 'sample_idx']][start: end] = ref_scores[['shard_idx', 'sample_idx']]
+        scores['learn_score'][start: end] = learn_score
     
-    ### LOG METRICS
     torch.cuda.synchronize()
-    if ddp: dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+    if ddp:
+        gathered_scores = [np.empty(0) for _ in range(ddp_world_size)]
+        dist.all_gather_object(gathered_scores, scores)
+        scores = np.concatenate(gathered_scores)
+    
+    if master_process: print(f'### {len(scores)} scores computed')
+    
+    selected_idxs = joint_examples_selection(scores['learn_score'], total_batch_size//T, config.n_chunks)
+    selected_idxs = list(np.array_split(selected_idxs , ddp_world_size)[ddp_rank])
+    examples_idxs = scores[['shard_idx','sample_idx']][selected_idxs]
+    subset_dataloader = train_loader.new_dataloader_from_idxs(examples_idxs)
+    if master_process: print(f'### Slected {len(examples_idxs)} examples in {config.n_chunks} chunks')
+
+    ### TRAIN GRAD ACCUM LOOP
+    grad_accum_steps = len(subset_dataloader)
+    if master_process: print(f'\n### Train step with {grad_accum_steps} grad accum steps')
+        loss_accum, norm, lr = jest_train_step(config, ddp, device, device_type, model, optimizer, step, subset_dataloader, grad_accum_steps)
+    
+    ## LOG STATS
     if master_process:
         t1 = time.time()
         dt = (t1-t0)

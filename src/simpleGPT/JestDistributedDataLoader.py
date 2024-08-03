@@ -4,6 +4,7 @@ import numpy as np
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import time
+import copy
 
 def load_tokens(filename):
     toks = torch.tensor(np.load(filename), dtype=torch.long)
@@ -38,7 +39,10 @@ class JestDistributedDataloader:
         self.curr_position = 0   
     
     def __len__(self):
-        return 1 + self.samples.shape[0] // self.B 
+        return int(np.ceil(self.samples.shape[0]/self.B))
+    
+    def reset(self):
+        self.curr_position = 0
         
     def load_dataset(self):
         fns = os.listdir(self.data_dir)
@@ -117,8 +121,6 @@ class JestDistributedDataloader:
 
     def new_batch(self):
         B = self.B
-        ref_sc = None
-        
         if self.curr_position + B <= self.samples.size(0):
             buf = self.samples[self.curr_position : self.curr_position + B, :]
             if self.jest:
@@ -141,7 +143,23 @@ class JestDistributedDataloader:
         x = buf[:, :-1]
         y = buf[:, 1:]
 
-        return x, y, ref_sc
+        if self.jest:
+            return x, y, ref_sc
+        else:
+            return x, y
+    
+    def new_dataloader_from_idxs(self, samples_idxs):
+
+        matching_row_idxs = np.array([
+            np.where(self.ref_scores[['shard_idx','sample_idx']] == row[['shard_idx','sample_idx']])[0][0] 
+            for row in samples_idxs])
+
+        new_dataloader = copy.copy(self)
+        new_dataloader.samples = self.samples[matching_row_idxs]
+        new_dataloader.ref_scores = self.ref_scores[matching_row_idxs]
+        new_dataloader.reset()
+        return new_dataloader
+        
         
     def compute_and_cache_ref_scores(self, model_name, device, device_type, autocast_bf16, compile_model):
         assert model_name in {
