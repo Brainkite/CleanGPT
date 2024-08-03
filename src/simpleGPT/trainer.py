@@ -95,7 +95,7 @@ def get_most_likely_row(tokens, mask, logits):
 def hellaswag_eval_step(config, ddp, ddp_rank, ddp_world_size, device, device_type, model):
     num_correct_norm = 0
     num_total = 0
-    n = 10
+    n = 10_042
     for i, example in tqdm(enumerate(iterate_examples("val")), total=10_042):
         if i > n: break
             # only process examples where i % ddp_world_size == ddp_rank
