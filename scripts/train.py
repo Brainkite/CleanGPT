@@ -36,7 +36,7 @@ config = Gpt2TrainConfig(
     min_lr_ratio = 0.1, #0.1
     warmup_steps = 100, #GPT2:715 (100)
     max_steps = 19_073, #19_073
-    val_every_n_steps = 100, #100
+    val_every_n_steps = 250, #100
     val_n_steps = 20, #20
     
     # Optimizer
@@ -52,7 +52,7 @@ config = Gpt2TrainConfig(
     #JEST
     ref_model_name = 'openai-community/gpt2',
     online_jest = False,
-    filtering_ratio = 0.5,
+    filtering_ratio = 0.8,
     n_chunks = 16,
     ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T1024.npy'
 )
