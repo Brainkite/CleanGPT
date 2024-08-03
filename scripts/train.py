@@ -17,10 +17,10 @@ from simpleGPT.trainer import hellaswag_eval_step, jest_train_step, validation_s
 
 config = Gpt2TrainConfig(
     #Dataloader
-    data_dir = "/workspaces/simpleGPT/datasets/edu_fineweb10B",
-    total_batch_size = 8 * 1024, # 2**19 # ~ 0.5M tokens
+    data_dir = "/workspace/datasets/edu_fineweb10B",
+    total_batch_size = 16 * 1024, # 2**19 # ~ 0.5M tokens
     # bs = int(os.getenv('BS')),# 64 (A100 80Gb) 8 (RTX4090)
-    bs = 4,
+    bs = 2,
     shuffle_seq= True,
     
     # Model params
@@ -36,7 +36,7 @@ config = Gpt2TrainConfig(
     max_lr = 6e-4 * 3, #6e-4
     min_lr_ratio = 0.1, #0.1
     warmup_steps = 2, #GPT2:715 (100)
-    max_steps = 4, #19_073
+    max_steps = 1, #19_073
     val_every_n_steps = 2, #100
     val_n_steps = 2, #20
     
@@ -45,7 +45,7 @@ config = Gpt2TrainConfig(
     
     # Other
     matmul_precision = 1, #1
-    autocast_bf16 = False, #TRUE
+    autocast_bf16 = True, #TRUE
     compile_model = False, #False
     use_grad_clip = True, #TRUE
     seed = 1337, #1337
@@ -55,7 +55,7 @@ config = Gpt2TrainConfig(
     online_jest = False,
     filtering_ratio = 0.5,
     n_chunks = 4,
-    ref_scores_fp='/workspaces/simpleGPT/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T512.npy'
+    ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T512.npyyyy'
 )
 
 # SETUP DDP
@@ -114,10 +114,9 @@ if master_process:
     wandb.config['ddp_world_size'] = ddp_world_size
     wandb.config['super_batch_size'] = super_batch_size
     wandb.config['actual_filtering_ratio'] = actual_filtering_ratio
-    print(f"\n### Total batch size: {total_batch_size} => gradient accumulation steps: {grad_accum_steps}")
-    print(f"### Super batch size: {super_batch_size} => jest steps: {jest_steps}")
+    print(f"\n### Total batch size: {total_batch_size//T} samples => gradient accumulation steps: {grad_accum_steps}")
+    print(f"### Super batch size: {super_batch_size//T} samples => jest steps: {jest_steps}")
     print(f"### Actual filtering ratio: {actual_filtering_ratio:.4f}")
-    print(f"### Gradient accumulation steps: {grad_accum_steps}")
 
 train_loader = JestDistributedDataloader(
     config.data_dir, 
@@ -132,8 +131,7 @@ train_loader = JestDistributedDataloader(
 
 val_loader = JestDistributedDataloader(
     config.data_dir, 
-    B, 
-    T, 
+    B, T, 
     jest=False, 
     process_rank=ddp_rank, 
     num_processes=ddp_world_size, 
@@ -202,7 +200,7 @@ for step in range(config.max_steps):
     ### VALIDATION
     if step>0 and (step % config.val_every_n_steps == 0) or final_step:
         if master_process: print('\n### Validation')
-            val_loss_accum = validation_step(config, device, device_type, val_loader, model)
+        val_loss_accum = validation_step(config, device, device_type, val_loader, model)
         if ddp: dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
         if master_process:
             print(f"Validation loss: {val_loss_accum:04f}")
@@ -211,7 +209,7 @@ for step in range(config.max_steps):
     ### EVAL ON HELLASWAG
     if step>0 and (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
         if master_process: print('\n### Hellaswag evaluation')
-            num_correct_norm, num_total, acc_norm = hellaswag_eval_step(config, ddp, ddp_rank, ddp_world_size, device, device_type, model)
+        num_correct_norm, num_total, acc_norm = hellaswag_eval_step(config, ddp, ddp_rank, ddp_world_size, device, device_type, model)
         if master_process:
             print(f"HellaSwag accuracy: {num_correct_norm}/{num_total}={acc_norm:.4f}")
             wandb.log({'step':step, "HS_acc":acc_norm})
@@ -220,10 +218,11 @@ for step in range(config.max_steps):
     if master_process: print('\n### JEST Example Selection')
     model.eval()
     dtype = np.dtype([('shard_idx', np.uint16), ('sample_idx', np.uint32), ('learn_score', np.float32)])
-    scores = np.zeros(super_batch_size // T, dtype=dtype)
+    scores = np.zeros(super_batch_size // (T * ddp_world_size), dtype=dtype)
     for i in range(jest_steps):
         x, y, ref_scores = train_loader.new_batch()
         x, y = x.to(device), y.to(device)
+        
         if config.autocast_bf16 :
             with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                 samples_losses = _jest_forward(x,y,model)
@@ -243,18 +242,19 @@ for step in range(config.max_steps):
         dist.all_gather_object(gathered_scores, scores)
         scores = np.concatenate(gathered_scores)
     
-    if master_process: print(f'### {len(scores)} scores computed')
+    if master_process: print(f'### {len(scores)} scores gathered')
     
     selected_idxs = joint_examples_selection(scores['learn_score'], total_batch_size//T, config.n_chunks)
     selected_idxs = list(np.array_split(selected_idxs , ddp_world_size)[ddp_rank])
     examples_idxs = scores[['shard_idx','sample_idx']][selected_idxs]
+    if master_process: print(f'### Slected {len(examples_idxs)} examples in {config.n_chunks} chunks for each rank')
+    
     subset_dataloader = train_loader.new_dataloader_from_idxs(examples_idxs)
-    if master_process: print(f'### Slected {len(examples_idxs)} examples in {config.n_chunks} chunks')
 
     ### TRAIN GRAD ACCUM LOOP
     grad_accum_steps = len(subset_dataloader)
     if master_process: print(f'\n### Train step with {grad_accum_steps} grad accum steps')
-        loss_accum, norm, lr = jest_train_step(config, ddp, device, device_type, model, optimizer, step, subset_dataloader, grad_accum_steps)
+    loss_accum, norm, lr = jest_train_step(config, ddp, device, device_type, model, optimizer, step, subset_dataloader, grad_accum_steps)
     
     ## LOG STATS
     if master_process:
