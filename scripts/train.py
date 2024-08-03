@@ -19,8 +19,7 @@ config = Gpt2TrainConfig(
     #Dataloader
     data_dir = "/workspace/datasets/edu_fineweb10B",
     total_batch_size = 512 * 1024, # 2**19 # ~ 0.5M tokens
-    # bs = int(os.getenv('BS')),# 64 (A100 80Gb) 16 (RTX4090)
-    bs = 2,
+    bs = int(os.getenv('BS')),# 64 (A100 80Gb) 16 (RTX4090)
     shuffle_seq= True,
     
     # Model params
@@ -35,10 +34,10 @@ config = Gpt2TrainConfig(
     # LR Scheduler params
     max_lr = 6e-4 * 3, #6e-4
     min_lr_ratio = 0.1, #0.1
-    warmup_steps = 2, #GPT2:715 (100)
-    max_steps = 2, #19_073
-    val_every_n_steps = 2, #100
-    val_n_steps = 2, #20
+    warmup_steps = 100, #GPT2:715 (100)
+    max_steps = 19_073, #19_073
+    val_every_n_steps = 100, #100
+    val_n_steps = 20, #20
     
     # Optimizer
     wd = 0.1, #0.1
@@ -54,7 +53,7 @@ config = Gpt2TrainConfig(
     ref_model_name = 'openai-community/gpt2',
     online_jest = False,
     filtering_ratio = 0.5,
-    n_chunks = 8,
+    n_chunks = 16,
     ref_scores_fp='/workspace/datasets/ref_scores/edu_fineweb10B_ref_scores_gpt2_T1024.npy'
 )
 
@@ -116,15 +115,14 @@ if master_process:
     wandb.config['ddp_world_size'] = ddp_world_size
     wandb.config['super_batch_size'] = super_batch_size
     wandb.config['actual_filtering_ratio'] = actual_filtering_ratio
-    print(f"\n### JEST Super batch size: {super_batch_size//T} samples => jest steps: {jest_steps}")
-    print(f"### Total batch size: {total_batch_size//T} samples => gradient accumulation steps: {grad_accum_steps}")
-    print(f"### n_chunks: {config.n_chunks} => samples_per_chunk: {total_batch_size//(T*config.n_chunks)}")
+    print(f"\n### JEST Super batch size: {super_batch_size//T} samples => jest steps: {jest_steps} per rank")
+    print(f"### Total batch size: {total_batch_size//T} samples => gradient accumulation steps: {grad_accum_steps} per rank")
+    print(f"### Examples selected in {config.n_chunks} chunks of {total_batch_size//(T*config.n_chunks)} samples")
     print(f"### Actual filtering ratio: {actual_filtering_ratio:.4f}")
     
     print(f"\n### For each rank:")
     print(f"### JEST samples: {super_batch_size//(T*ddp_world_size)}")
-    print(f"### num selected samples: {total_batch_size//(T*ddp_world_size)}")
-    print(f"### in {config.n_chunks//ddp_world_size} chunks")
+    print(f"### Num examples selected: {total_batch_size//(T*ddp_world_size)} in {config.n_chunks//ddp_world_size} chunks")
 
 train_loader = JestDistributedDataloader(
     config.data_dir, 
@@ -192,7 +190,7 @@ model = GPT(
         )
     )
 model.to(device)
-# TODO: add suupot to keep compiled and uncompiled model in memory for faster train and validation taime but stable hellaswag eval
+
 if config.compile_model : model = torch.compile(model)
 if ddp: model = DDP(module=model, device_ids=[ddp_local_rank])
 raw_model = model.module if ddp else model #Contains the model unwrapped 
@@ -203,7 +201,7 @@ optimizer = raw_model.configure_optimizers(weight_decay=config.wd , learning_rat
 ### TRAIN LOOP
 if master_process: print("\n### Start trainning...")
 dt_hist = []
-for step in range(config.max_steps):
+for step in range(config.max_steps//3):
     final_step = step == config.max_steps-1
     if master_process: t0 = time.time()
     
