@@ -45,7 +45,7 @@ config = Gpt2TrainConfig(
     # Other
     matmul_precision = 1, #1
     autocast_bf16 = True, #TRUE
-    compile_model = False, #False
+    compile_model = True, #False
     use_grad_clip = True, #TRUE
     seed = 1337, #1337
     
@@ -214,13 +214,13 @@ for step in range(config.max_steps//3):
             print(f"Validation loss: {val_loss_accum:04f}")
             wandb.log({"step": step, "val_loss": val_loss_accum})
     
-    ### EVAL ON HELLASWAG
-    if step>0 and (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
-        if master_process: print('\n### Hellaswag evaluation')
-        num_correct_norm, num_total, acc_norm = hellaswag_eval_step(config, ddp, ddp_rank, ddp_world_size, device, device_type, model)
-        if master_process:
-            print(f"HellaSwag accuracy: {num_correct_norm}/{num_total}={acc_norm:.4f}")
-            wandb.log({'step':step, "HS_acc":acc_norm})
+    # ### EVAL ON HELLASWAG
+    # if step>0 and (not config.compile_model) and ((step % config.val_every_n_steps == 0) or final_step):
+    #     if master_process: print('\n### Hellaswag evaluation')
+    #     num_correct_norm, num_total, acc_norm = hellaswag_eval_step(config, ddp, ddp_rank, ddp_world_size, device, device_type, model)
+    #     if master_process:
+    #         print(f"HellaSwag accuracy: {num_correct_norm}/{num_total}={acc_norm:.4f}")
+    #         wandb.log({'step':step, "HS_acc":acc_norm})
 
     ## JEST Example Selection
     if master_process: print('\n### JEST Example Selection')
