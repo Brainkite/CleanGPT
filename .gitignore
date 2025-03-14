@@ -6,3 +6,7 @@ dataset
 **/*.txt
 scripts/playground.py
 wandb
+**/*.pth
+datasets
+ckpts
+vastai_script.sh
