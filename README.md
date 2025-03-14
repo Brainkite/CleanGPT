@@ -1,4 +1,4 @@
-# SimpleGPT
+# ✨ CleanGPT
 
 A clean PyTorch implementation of GPT-2 for pre-training on the [edu_fineweb10B dataset](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu). This repository provides a straightforward and educational reproduction of the GPT-2 architecture with modern PyTorch features.
 
@@ -19,8 +19,8 @@ The model is trained on the [edu_fineweb10B dataset](https://huggingface.co/data
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/simpleGPT.git
-cd simpleGPT
+git clone https://github.com/yourusername/CleanGPT.git
+cd CleanGPT
 pip install -e .
 ```
 
