@@ -84,18 +84,3 @@ config = dict(
     max_steps = 100,
 )
 ```
-
-## Testing
-
-Run the test suite with:
-```bash
-pytest
-```
-
-## License
-
-MIT
-
-## Acknowledgments
-
-This implementation is inspired by the original GPT-2 paper ["Language Models are Unsupervised Multitask Learners"](https://d4mucfpksywv.cloudfront.net/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) by Radford et al.
