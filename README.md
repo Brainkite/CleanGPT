@@ -1,6 +1,6 @@
 # SimpleGPT
 
-A clean PyTorch implementation of GPT-2 for pre-training on the edu_fineweb10B dataset. This repository provides a straightforward and educational reproduction of the GPT-2 architecture with modern PyTorch features.
+A clean PyTorch implementation of GPT-2 for pre-training on the [edu_fineweb10B dataset](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu). This repository provides a straightforward and educational reproduction of the GPT-2 architecture with modern PyTorch features.
 
 ## Features
 
@@ -10,6 +10,11 @@ A clean PyTorch implementation of GPT-2 for pre-training on the edu_fineweb10B d
 - 📊 Integration with Weights & Biases for experiment tracking
 - 🎯 Support for loading pre-trained GPT-2 weights
 - 🛠️ Configurable model sizes matching OpenAI's GPT-2 variants
+- 🔄 Enhanced training with data shuffling and optimized learning rates
+
+## Dataset
+
+The model is trained on the [edu_fineweb10B dataset](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu), a high-quality educational subset of the FineWeb corpus containing approximately 10B tokens. The dataset is filtered to focus on educational content, making it suitable for training language models for educational applications.
 
 ## Installation
 
@@ -28,6 +33,15 @@ tiktoken
 wandb
 ```
 
+## Model Architecture
+
+The implementation follows the original GPT-2 architecture with:
+- Multi-head self-attention
+- Layer normalization
+- Residual connections
+- Learned positional embeddings
+- Optional Flash Attention support for improved performance
+
 ## Training
 
 The training script (`scripts/train.py`) supports:
@@ -36,6 +50,8 @@ The training script (`scripts/train.py`) supports:
 - Distributed training across multiple GPUs
 - Weight decay with AdamW optimizer
 - Mixed precision training with bfloat16
+- Data shuffling for improved training dynamics
+- Optimized learning rate schedule
 
 Example training command:
 ```bash
@@ -68,3 +84,18 @@ config = dict(
     max_steps = 100,
 )
 ```
+
+## Testing
+
+Run the test suite with:
+```bash
+pytest
+```
+
+## License
+
+MIT
+
+## Acknowledgments
+
+This implementation is inspired by the original GPT-2 paper ["Language Models are Unsupervised Multitask Learners"](https://d4mucfpksywv.cloudfront.net/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) by Radford et al.
