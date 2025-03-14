@@ -2,11 +2,14 @@
 __pycache__
 src/simplegpt.egg-info
 .vscode
-dataset
+datasets
 **/*.txt
 scripts/playground.py
 wandb
+**/*.npy
 **/*.pth
-datasets
-ckpts
+
 vastai_script.sh
+test.ipynb
+scripts/update.py
+scripts/test_loader.ipynb

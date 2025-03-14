@@ -1,4 +1,7 @@
 transformers[torch]
+torchtune
+datasets
+tqdm
 pytest
 tiktoken
 wandb
